@@ -1,0 +1,11 @@
+# Build output
+/tomo
+/dist/
+
+# Downloaded manga (don't commit copyrighted content)
+/manga/
+*.cbz
+
+# Editor / OS
+.DS_Store
+*.swp
