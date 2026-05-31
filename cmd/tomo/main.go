@@ -242,34 +242,21 @@ func doChapter(ctx context.Context, src source.Source, manga *model.Manga, j job
 		return result{chapter: ch, err: fmt.Errorf("list pages: %w", err)}
 	}
 
-	referer := manga.URL
-	if ch.URL != "" {
-		referer = ch.URL
-	}
-	pages, err := download.Pages(ctx, urls, download.Options{
+	// Use the full chapter (reader) URL as the Referer — that's what a browser
+	// sends when loading the page images, so it satisfies both origin- and
+	// path-based hotlink checks. MangaDex chapters have no URL (API-served) and
+	// need no Referer.
+	res, err := download.Pages(ctx, urls, download.Options{
 		Concurrency: cfg.concurrency,
 		Retries:     cfg.retries,
-		Referer:     refererOrigin(referer),
+		Referer:     ch.URL,
 	})
 	if err != nil {
 		return result{chapter: ch, err: err}
 	}
-	if err := cbz.Write(j.path, pages); err != nil {
+	defer res.Cleanup()
+	if err := cbz.Write(j.path, res.Pages); err != nil {
 		return result{chapter: ch, err: fmt.Errorf("write cbz: %w", err)}
 	}
 	return result{chapter: ch}
-}
-
-// refererOrigin trims a chapter URL to its origin; many CDNs check only the
-// host portion of the Referer.
-func refererOrigin(u string) string {
-	if u == "" {
-		return ""
-	}
-	if i := strings.Index(u, "://"); i >= 0 {
-		if j := strings.IndexByte(u[i+3:], '/'); j >= 0 {
-			return u[:i+3+j]
-		}
-	}
-	return u
 }

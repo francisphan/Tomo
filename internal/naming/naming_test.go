@@ -43,10 +43,10 @@ func TestPadNumber(t *testing.T) {
 
 func TestSanitize(t *testing.T) {
 	cases := map[string]string{
-		`Solo Leveling`:           "Solo Leveling",
-		`A/B: The "Test"?`:        "A-B - The 'Test'",
-		`  trailing dots... `:     "trailing dots",
-		`Re:Zero <Arc 1>`:         "Re -Zero (Arc 1)",
+		`Solo Leveling`:       "Solo Leveling",
+		`A/B: The "Test"?`:    "A-B - The 'Test'",
+		`  trailing dots... `: "trailing dots",
+		`Re:Zero <Arc 1>`:     "Re -Zero (Arc 1)",
 	}
 	for in, want := range cases {
 		if got := Sanitize(in); got != want {

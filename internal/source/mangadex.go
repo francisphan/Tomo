@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 
@@ -46,7 +47,7 @@ func (m *MangaDex) Series(ctx context.Context, seriesURL string) (*model.Manga, 
 	var meta struct {
 		Data struct {
 			Attributes struct {
-				Title    map[string]string   `json:"title"`
+				Title     map[string]string   `json:"title"`
 				AltTitles []map[string]string `json:"altTitles"`
 			} `json:"attributes"`
 		} `json:"data"`
@@ -103,6 +104,13 @@ func (m *MangaDex) Series(ctx context.Context, seriesURL string) (*model.Manga, 
 			})
 		}
 		if offset+limit >= feed.Total || len(feed.Data) == 0 {
+			break
+		}
+		// MangaDex rejects feed requests where offset+limit exceeds 10000.
+		// Stop before that and warn rather than erroring out on a huge series.
+		if offset+2*limit > 10000 {
+			fmt.Fprintln(os.Stderr,
+				"warning: MangaDex caps the chapter feed at 10000 entries; some chapters of this very long series may be missing")
 			break
 		}
 	}

@@ -1,4 +1,9 @@
 // Package download fetches a chapter's page images concurrently with retries.
+//
+// Pages are streamed to temporary files rather than buffered in memory, so a
+// long manhwa chapter (often 50-150 full-width images) doesn't pin tens or
+// hundreds of MB of RAM. The caller zips from those files and then calls
+// Result.Cleanup to remove them.
 package download
 
 import (
@@ -7,7 +12,9 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,11 +24,25 @@ import (
 	"tomo/internal/httpx"
 )
 
-// Page is a single downloaded image, kept in memory until it is zipped.
+// Page is a single downloaded image on disk.
 type Page struct {
 	Index int    // 1-based position in the chapter
 	Ext   string // file extension including dot, e.g. ".jpg"
-	Data  []byte
+	Path  string // path to the temporary file holding the image
+}
+
+// Result is a downloaded chapter's pages plus the temp dir holding them.
+type Result struct {
+	Pages []Page
+	dir   string
+}
+
+// Cleanup removes the temporary files backing the pages. Safe to call on nil
+// and to call more than once.
+func (r *Result) Cleanup() {
+	if r != nil && r.dir != "" {
+		os.RemoveAll(r.dir)
+	}
 }
 
 // Options tune a chapter download.
@@ -34,15 +55,21 @@ type Options struct {
 	Retries int
 }
 
-// Pages downloads all image URLs and returns them ordered by index. It fails
-// fast: if any page cannot be fetched after retries, the whole chapter errors
-// so we never write a CBZ with missing pages.
-func Pages(ctx context.Context, urls []string, opts Options) ([]Page, error) {
+// Pages downloads all image URLs to temp files and returns them ordered by
+// index. It fails fast: if any page can't be fetched after retries, the whole
+// chapter errors (and its temp files are removed) so we never write a CBZ with
+// missing pages.
+func Pages(ctx context.Context, urls []string, opts Options) (*Result, error) {
 	if opts.Concurrency <= 0 {
 		opts.Concurrency = 8
 	}
 	if len(urls) == 0 {
 		return nil, fmt.Errorf("no pages found")
+	}
+
+	dir, err := os.MkdirTemp("", "tomo-chapter-*")
+	if err != nil {
+		return nil, err
 	}
 
 	// A child context lets us abort in-flight downloads the moment any page
@@ -51,7 +78,7 @@ func Pages(ctx context.Context, urls []string, opts Options) ([]Page, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	results := make([]Page, len(urls))
+	pages := make([]Page, len(urls))
 	sem := make(chan struct{}, opts.Concurrency)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -76,7 +103,7 @@ func Pages(ctx context.Context, urls []string, opts Options) ([]Page, error) {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			data, ct, err := fetchWithRetry(ctx, url, headers, opts.Retries)
+			p, err := fetchToFile(ctx, url, headers, opts.Retries, dir, idx)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
@@ -86,26 +113,29 @@ func Pages(ctx context.Context, urls []string, opts Options) ([]Page, error) {
 				mu.Unlock()
 				return
 			}
-			results[idx] = Page{Index: idx + 1, Ext: extFor(url, ct), Data: data}
+			pages[idx] = p
 		}(i, u)
 	}
 
 	wg.Wait()
 	if firstErr != nil {
+		os.RemoveAll(dir)
 		return nil, firstErr
 	}
-	sort.Slice(results, func(a, b int) bool { return results[a].Index < results[b].Index })
-	return results, nil
+	sort.Slice(pages, func(a, b int) bool { return pages[a].Index < pages[b].Index })
+	return &Result{Pages: pages, dir: dir}, nil
 }
 
-func fetchWithRetry(ctx context.Context, url string, headers map[string]string, retries int) ([]byte, string, error) {
+// fetchToFile downloads one image into dir, streaming the body to disk so the
+// full image is never held in memory.
+func fetchToFile(ctx context.Context, url string, headers map[string]string, retries int, dir string, index int) (Page, error) {
 	var lastErr error
 	var retryAfter time.Duration
 	for attempt := 0; attempt <= retries; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
-				return nil, "", ctx.Err()
+				return Page{}, ctx.Err()
 			case <-time.After(backoff(attempt, retryAfter)):
 			}
 		}
@@ -119,20 +149,51 @@ func fetchWithRetry(ctx context.Context, url string, headers map[string]string, 
 		// Respect server-side throttling rather than hammering through it.
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
 			retryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
-			io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-			resp.Body.Close()
+			drainClose(resp.Body)
 			lastErr = fmt.Errorf("status %d", resp.StatusCode)
 			continue
 		}
-		ct := resp.Header.Get("Content-Type")
-		data, err := readAll(resp)
-		if err != nil {
-			lastErr = err
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			drainClose(resp.Body)
+			lastErr = fmt.Errorf("status %d", resp.StatusCode)
 			continue
 		}
-		return data, ct, nil
+
+		ext := extFor(url, resp.Header.Get("Content-Type"))
+		dst := filepath.Join(dir, fmt.Sprintf("%04d%s", index+1, ext))
+		f, err := os.Create(dst)
+		if err != nil {
+			resp.Body.Close()
+			return Page{}, err // local FS error — not retryable
+		}
+		n, copyErr := io.Copy(f, resp.Body)
+		resp.Body.Close()
+		closeErr := f.Close()
+		if copyErr != nil {
+			os.Remove(dst)
+			lastErr = copyErr
+			continue
+		}
+		if closeErr != nil {
+			os.Remove(dst)
+			lastErr = closeErr
+			continue
+		}
+		if n == 0 {
+			os.Remove(dst)
+			lastErr = fmt.Errorf("empty body")
+			continue
+		}
+		return Page{Index: index + 1, Ext: ext, Path: dst}, nil
 	}
-	return nil, "", lastErr
+	return Page{}, lastErr
+}
+
+// drainClose consumes a little of the body (to allow connection reuse) and
+// closes it.
+func drainClose(body io.ReadCloser) {
+	io.Copy(io.Discard, io.LimitReader(body, 4096))
+	body.Close()
 }
 
 // backoff returns how long to wait before the next attempt: at least the
@@ -156,21 +217,6 @@ func parseRetryAfter(v string) time.Duration {
 		return time.Duration(secs) * time.Second
 	}
 	return 0
-}
-
-func readAll(resp *http.Response) ([]byte, error) {
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
-	}
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, fmt.Errorf("empty body")
-	}
-	return data, nil
 }
 
 // extFor picks a sensible file extension from the URL, falling back to the

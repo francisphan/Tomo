@@ -8,6 +8,7 @@ package cbz
 import (
 	"archive/zip"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -16,9 +17,10 @@ import (
 	"tomo/internal/naming"
 )
 
-// Write creates a CBZ at path containing the given pages. It writes to a
-// temporary file first and renames on success, so a crash mid-write never
-// leaves a half-written archive that the reader would treat as complete.
+// Write creates a CBZ at path containing the given pages, streaming each page's
+// temp file into the archive so a whole chapter is never held in memory. It
+// writes to a temporary file first and renames on success, so a crash mid-write
+// never leaves a half-written archive that the reader would treat as complete.
 func Write(path string, pages []download.Page) error {
 	if len(pages) == 0 {
 		return fmt.Errorf("refusing to write empty CBZ: %s", path)
@@ -37,6 +39,12 @@ func Write(path string, pages []download.Page) error {
 	tmp := f.Name()
 
 	zw := zip.NewWriter(f)
+	fail := func(err error) error {
+		zw.Close()
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
 	for _, p := range pages {
 		hdr := &zip.FileHeader{
 			Name:     naming.PageName(p.Index, p.Ext),
@@ -45,17 +53,17 @@ func Write(path string, pages []download.Page) error {
 		}
 		w, err := zw.CreateHeader(hdr)
 		if err != nil {
-			zw.Close()
-			f.Close()
-			os.Remove(tmp)
-			return err
+			return fail(err)
 		}
-		if _, err := w.Write(p.Data); err != nil {
-			zw.Close()
-			f.Close()
-			os.Remove(tmp)
-			return err
+		src, err := os.Open(p.Path)
+		if err != nil {
+			return fail(err)
 		}
+		if _, err := io.Copy(w, src); err != nil {
+			src.Close()
+			return fail(err)
+		}
+		src.Close()
 	}
 	if err := zw.Close(); err != nil {
 		f.Close()
