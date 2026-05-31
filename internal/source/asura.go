@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -11,6 +12,8 @@ import (
 	"tomo/internal/httpx"
 	"tomo/internal/model"
 )
+
+var _ Searcher = (*Asura)(nil)
 
 // Asura scrapes asuracomic.net (Asura Scans), a popular manhwa scanlation site.
 //
@@ -33,6 +36,44 @@ var (
 	asuraChapterHref = regexp.MustCompile(`/chapter/[\w.\-]+`)
 	asuraChapterNum  = regexp.MustCompile(`(?i)chapter\s*([\d.]+)`)
 )
+
+func (a *Asura) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
+	const base = "https://asuracomic.net/"
+	searchURL := base + "series?name=" + url.QueryEscape(query)
+	doc, err := httpx.GetDoc(ctx, searchURL, map[string]string{"Referer": base})
+	if err != nil {
+		return nil, err
+	}
+	var out []SearchResult
+	seen := map[string]bool{}
+	doc.Find(`a[href*="/series/"]`).EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		href, _ := s.Attr("href")
+		// Skip the bare listing link and chapter links.
+		if !strings.Contains(href, "/series/") || strings.HasSuffix(href, "/series") || strings.Contains(href, "/chapter/") {
+			return true
+		}
+		full := abs(base, href)
+		if seen[full] {
+			return true
+		}
+		title := cleanText(s.Find("span, h3").First().Text())
+		if title == "" {
+			if alt, ok := s.Find("img").Attr("alt"); ok {
+				title = strings.TrimSpace(alt)
+			}
+		}
+		if title == "" {
+			title = cleanText(s.Text())
+		}
+		if title == "" {
+			return true
+		}
+		seen[full] = true
+		out = append(out, SearchResult{Title: title, URL: full, Source: a.Name()})
+		return limit <= 0 || len(out) < limit
+	})
+	return out, nil
+}
 
 func (a *Asura) Series(ctx context.Context, seriesURL string) (*model.Manga, error) {
 	doc, err := httpx.GetDoc(ctx, seriesURL, map[string]string{"Referer": origin(seriesURL)})

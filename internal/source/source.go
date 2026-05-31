@@ -21,6 +21,21 @@ type Source interface {
 	Pages(ctx context.Context, ch model.Chapter) ([]string, error)
 }
 
+// SearchResult is one hit from a title search: a series and the URL to feed
+// back into a download.
+type SearchResult struct {
+	Title  string
+	URL    string
+	Source string
+	Info   string // optional extra detail, e.g. "ongoing · 2018"
+}
+
+// Searcher is an optional capability: a Source that can find series by title.
+// Use a type assertion (s, ok := src.(Searcher)) to detect support.
+type Searcher interface {
+	Search(ctx context.Context, query string, limit int) ([]SearchResult, error)
+}
+
 var registry []Source
 
 // Register adds a source to the global registry. Adapters call this from

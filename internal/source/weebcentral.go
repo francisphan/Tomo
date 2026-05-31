@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -11,6 +12,8 @@ import (
 	"tomo/internal/httpx"
 	"tomo/internal/model"
 )
+
+var _ Searcher = (*WeebCentral)(nil)
 
 // WeebCentral scrapes weebcentral.com. The site is HTMX-driven: the full
 // chapter list and the reader images are served from dedicated fragment
@@ -37,6 +40,61 @@ var (
 )
 
 const wcBase = "https://weebcentral.com"
+
+func (w *WeebCentral) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
+	n := limit
+	if n <= 0 {
+		n = 32
+	}
+	q := url.Values{}
+	q.Set("text", query)
+	q.Set("limit", fmt.Sprint(n))
+	q.Set("offset", "0")
+	q.Set("sort", "Best Match")
+	q.Set("order", "Descending")
+	q.Set("official", "Any")
+	q.Set("display_mode", "Full Display")
+	searchURL := wcBase + "/search/data?" + q.Encode()
+
+	doc, err := httpx.GetDoc(ctx, searchURL, map[string]string{
+		"Referer":          wcBase + "/search",
+		"HX-Request":       "true",
+		"X-Requested-With": "XMLHttpRequest",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var out []SearchResult
+	seen := map[string]bool{}
+	doc.Find(`a[href*="/series/"]`).EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		href, _ := s.Attr("href")
+		m := wcSeriesID.FindStringSubmatch(href)
+		if len(m) != 2 || seen[m[1]] {
+			return true
+		}
+		// Prefer the cover's alt text — the card's full text includes badge
+		// labels ("Official") and layout whitespace.
+		title := ""
+		if alt, ok := s.Find("img").Attr("alt"); ok {
+			// WeebCentral cover alts are "<Title> cover".
+			title = strings.TrimSpace(alt)
+			if strings.HasSuffix(strings.ToLower(title), " cover") {
+				title = strings.TrimSpace(title[:len(title)-len(" cover")])
+			}
+		}
+		if title == "" {
+			title = cleanText(s.Text())
+		}
+		if title == "" {
+			return true
+		}
+		seen[m[1]] = true
+		out = append(out, SearchResult{Title: title, URL: abs(wcBase, href), Source: w.Name()})
+		return limit <= 0 || len(out) < limit
+	})
+	return out, nil
+}
 
 func (w *WeebCentral) Series(ctx context.Context, seriesURL string) (*model.Manga, error) {
 	m := wcSeriesID.FindStringSubmatch(seriesURL)

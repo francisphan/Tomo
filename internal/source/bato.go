@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -12,6 +13,8 @@ import (
 	"tomo/internal/httpx"
 	"tomo/internal/model"
 )
+
+var _ Searcher = (*Bato)(nil)
 
 // Bato scrapes bato.to and its many mirror domains. The reader page embeds the
 // page image URLs in a script as an array (historically `imgHttps`); we extract
@@ -52,6 +55,40 @@ var (
 	// `]`, so a `]` inside a URL doesn't truncate the capture.
 	batoImgArray = regexp.MustCompile(`(?:imgHttps|"images"|"imageFiles"|const\s+images)\s*[=:]\s*(\[[^;]*\])`)
 )
+
+func (b *Bato) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
+	const base = "https://bato.to/"
+	searchURL := base + "search?word=" + url.QueryEscape(query)
+	doc, err := httpx.GetDoc(ctx, searchURL, map[string]string{"Referer": base})
+	if err != nil {
+		return nil, err
+	}
+	var out []SearchResult
+	seen := map[string]bool{}
+	doc.Find(`a[href*="/title/"], a[href*="/series/"]`).EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		href, _ := s.Attr("href")
+		if strings.Contains(href, "/chapter/") {
+			return true
+		}
+		full := abs(base, href)
+		if seen[full] {
+			return true
+		}
+		title := cleanText(s.Text())
+		if title == "" {
+			if alt, ok := s.Find("img").Attr("alt"); ok {
+				title = strings.TrimSpace(alt)
+			}
+		}
+		if title == "" {
+			return true
+		}
+		seen[full] = true
+		out = append(out, SearchResult{Title: title, URL: full, Source: b.Name()})
+		return limit <= 0 || len(out) < limit
+	})
+	return out, nil
+}
 
 func (b *Bato) Series(ctx context.Context, seriesURL string) (*model.Manga, error) {
 	doc, err := httpx.GetDoc(ctx, seriesURL, map[string]string{"Referer": origin(seriesURL)})

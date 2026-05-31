@@ -75,3 +75,9 @@ func stripQ(u string) string {
 	}
 	return u
 }
+
+// cleanText collapses runs of whitespace (including the newlines and indent
+// that show up when scraping a card's full text) into single spaces.
+func cleanText(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}

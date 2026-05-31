@@ -22,6 +22,8 @@ type MangaDex struct {
 
 func init() { Register(&MangaDex{Lang: "en"}) }
 
+var _ Searcher = (*MangaDex)(nil)
+
 func (m *MangaDex) Name() string { return "mangadex" }
 
 func (m *MangaDex) Matches(u string) bool {
@@ -68,7 +70,7 @@ func (m *MangaDex) Series(ctx context.Context, seriesURL string) (*model.Manga, 
 		q.Add("translatedLanguage[]", m.lang())
 		q.Set("order[chapter]", "asc")
 		q.Set("order[volume]", "asc")
-		for _, r := range []string{"safe", "suggestive", "erotica", "pornographic"} {
+		for _, r := range contentRatings {
 			q.Add("contentRating[]", r)
 		}
 		q.Add("includes[]", "scanlation_group")
@@ -117,6 +119,56 @@ func (m *MangaDex) Series(ctx context.Context, seriesURL string) (*model.Manga, 
 
 	manga.Chapters = dedupeByNumber(manga.Chapters)
 	return manga, nil
+}
+
+// contentRatings requests every rating so search and feeds aren't silently
+// filtered to "safe" only.
+var contentRatings = []string{"safe", "suggestive", "erotica", "pornographic"}
+
+func (m *MangaDex) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 10
+	}
+	q := url.Values{}
+	q.Set("title", query)
+	q.Set("limit", fmt.Sprint(limit))
+	q.Set("order[relevance]", "desc")
+	for _, r := range contentRatings {
+		q.Add("contentRating[]", r)
+	}
+
+	var resp struct {
+		Data []struct {
+			ID         string `json:"id"`
+			Attributes struct {
+				Title     map[string]string   `json:"title"`
+				AltTitles []map[string]string `json:"altTitles"`
+				Year      int                 `json:"year"`
+				Status    string              `json:"status"`
+			} `json:"attributes"`
+		} `json:"data"`
+	}
+	if err := httpx.GetJSON(ctx, "https://api.mangadex.org/manga?"+q.Encode(), nil, &resp); err != nil {
+		return nil, err
+	}
+
+	results := make([]SearchResult, 0, len(resp.Data))
+	for _, d := range resp.Data {
+		info := d.Attributes.Status
+		if d.Attributes.Year > 0 {
+			if info != "" {
+				info += " · "
+			}
+			info += fmt.Sprint(d.Attributes.Year)
+		}
+		results = append(results, SearchResult{
+			Title:  pickTitle(d.Attributes.Title, d.Attributes.AltTitles, m.lang()),
+			URL:    "https://mangadex.org/title/" + d.ID,
+			Source: m.Name(),
+			Info:   info,
+		})
+	}
+	return results, nil
 }
 
 func (m *MangaDex) Pages(ctx context.Context, ch model.Chapter) ([]string, error) {

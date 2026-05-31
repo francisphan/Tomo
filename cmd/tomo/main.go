@@ -42,6 +42,15 @@ type config struct {
 }
 
 func main() {
+	// Subcommands. The default (no subcommand) is download.
+	if len(os.Args) > 1 && os.Args[1] == "search" {
+		if err := runSearch(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	cfg := config{}
 	flag.StringVar(&cfg.out, "out", "./manga", "output directory (a per-series subfolder is created)")
 	flag.StringVar(&cfg.chapters, "chapters", "", `chapters to fetch, e.g. "1-20,25,40-" (default: all)`)
@@ -68,12 +77,100 @@ func main() {
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "Tomo — download manga/manhwa chapters as CBZ for Tachimanga\n\n")
-	fmt.Fprintf(os.Stderr, "Usage:\n  tomo [flags] <series-url>\n\nFlags:\n")
+	fmt.Fprintf(os.Stderr, "Usage:\n")
+	fmt.Fprintf(os.Stderr, "  tomo [flags] <series-url>      download a series\n")
+	fmt.Fprintf(os.Stderr, "  tomo search [flags] <query>    find a series by title\n\n")
+	fmt.Fprintf(os.Stderr, "Download flags:\n")
 	flag.PrintDefaults()
 	fmt.Fprintf(os.Stderr, "\nSupported sites:\n")
 	for _, s := range source.All() {
 		fmt.Fprintf(os.Stderr, "  - %s\n", s.Name())
 	}
+}
+
+// runSearch implements `tomo search`. It queries every source that supports
+// search (or just the one named with -source) concurrently and prints the hits
+// with the URL to paste into a download.
+func runSearch(argv []string) error {
+	fs := flag.NewFlagSet("search", flag.ExitOnError)
+	var srcName string
+	var limit int
+	fs.StringVar(&srcName, "source", "", "limit to one source by name (e.g. mangadex)")
+	fs.IntVar(&limit, "limit", 10, "max results per source")
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage:\n  tomo search [flags] <query>\n\nFlags:\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(argv); err != nil {
+		return err
+	}
+	query := strings.TrimSpace(strings.Join(fs.Args(), " "))
+	if query == "" {
+		fs.Usage()
+		return fmt.Errorf("a search query is required")
+	}
+
+	type namedSearcher struct {
+		name string
+		s    source.Searcher
+	}
+	var searchers []namedSearcher
+	for _, s := range source.All() {
+		se, ok := s.(source.Searcher)
+		if !ok || (srcName != "" && s.Name() != srcName) {
+			continue
+		}
+		searchers = append(searchers, namedSearcher{s.Name(), se})
+	}
+	if len(searchers) == 0 {
+		if srcName != "" {
+			return fmt.Errorf("source %q does not support search (or is unknown)", srcName)
+		}
+		return fmt.Errorf("no searchable sources registered")
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	type outcome struct {
+		name    string
+		results []source.SearchResult
+		err     error
+	}
+	outs := make([]outcome, len(searchers))
+	var wg sync.WaitGroup
+	for i, ns := range searchers {
+		wg.Add(1)
+		go func(i int, ns namedSearcher) {
+			defer wg.Done()
+			res, err := ns.s.Search(ctx, query, limit)
+			outs[i] = outcome{ns.name, res, err}
+		}(i, ns)
+	}
+	wg.Wait()
+
+	total := 0
+	for _, o := range outs {
+		fmt.Printf("\n%s:\n", o.name)
+		switch {
+		case o.err != nil:
+			fmt.Printf("  (search failed: %v)\n", o.err)
+		case len(o.results) == 0:
+			fmt.Printf("  (no results)\n")
+		default:
+			for _, r := range o.results {
+				total++
+				if r.Info != "" {
+					fmt.Printf("  %s  [%s]\n", r.Title, r.Info)
+				} else {
+					fmt.Printf("  %s\n", r.Title)
+				}
+				fmt.Printf("      %s\n", r.URL)
+			}
+		}
+	}
+	fmt.Printf("\n%d result(s). Download with:  tomo <url>\n", total)
+	return nil
 }
 
 func run(cfg config, seriesURL string) error {

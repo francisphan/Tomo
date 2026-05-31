@@ -38,6 +38,28 @@ func TestSortChaptersAscending(t *testing.T) {
 	}
 }
 
+func TestCleanText(t *testing.T) {
+	cases := map[string]string{
+		"  Solo   Leveling ":  "Solo Leveling",
+		"Official\n\n  Title": "Official Title",
+		"line1\n\t line2":     "line1 line2",
+		"":                    "",
+	}
+	for in, want := range cases {
+		if got := cleanText(in); got != want {
+			t.Errorf("cleanText(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestAllRegisteredSourcesSearchable(t *testing.T) {
+	for _, s := range All() {
+		if _, ok := s.(Searcher); !ok {
+			t.Errorf("source %q does not implement Searcher", s.Name())
+		}
+	}
+}
+
 func TestCleanChapterTitle(t *testing.T) {
 	cases := []struct{ text, number, want string }{
 		{"Chapter 10 - The Title", "10", "The Title"},

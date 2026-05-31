@@ -22,6 +22,29 @@ This produces a single static `tomo` binary.
 ## Usage
 
 ```bash
+tomo [flags] <series-url>      # download a series
+tomo search [flags] <query>    # find a series by title
+```
+
+### Search
+
+Don't have the URL? Search by title across the supported sites and copy a
+result URL into a download:
+
+```bash
+tomo search chainsaw man              # all searchable sources
+tomo search -source mangadex chainsaw man   # just one source
+tomo search -limit 5 solo leveling          # cap results per source
+```
+
+Each hit prints the series title and the URL to paste back into `tomo <url>`.
+Sources are queried concurrently; a source that errors (e.g. markup change or
+timeout) is reported inline without failing the others. MangaDex search uses
+its official API and is the most reliable.
+
+### Download
+
+```bash
 tomo [flags] <series-url>
 ```
 
@@ -135,7 +158,9 @@ internal/
 
 Implement the `source.Source` interface (four methods) in a new file under
 `internal/source/`, call `source.Register(...)` from its `init()`, and that's
-it — the CLI picks it up automatically via `Matches(url)`.
+it — the CLI picks it up automatically via `Matches(url)`. To make the source
+searchable, also implement the optional `source.Searcher` interface
+(`Search(ctx, query, limit)`); `tomo search` discovers it via a type assertion.
 
 ## Legal
 
