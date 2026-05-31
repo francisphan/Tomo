@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -39,9 +40,17 @@ type config struct {
 	retries        int
 	list           bool
 	overwrite      bool
+	json           bool
 }
 
+// version is overridden at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "-version" || os.Args[1] == "--version" || os.Args[1] == "version") {
+		fmt.Println("tomo", version)
+		return
+	}
 	// Subcommands. The default (no subcommand) is download.
 	if len(os.Args) > 1 && os.Args[1] == "search" {
 		if err := runSearch(os.Args[2:]); err != nil {
@@ -60,6 +69,7 @@ func main() {
 	flag.IntVar(&cfg.retries, "retries", 3, "retry attempts per failed image")
 	flag.BoolVar(&cfg.list, "list", false, "list chapters without downloading")
 	flag.BoolVar(&cfg.overwrite, "overwrite", false, "re-download chapters whose CBZ already exists")
+	flag.BoolVar(&cfg.json, "json", false, "emit machine-readable NDJSON progress (used by the desktop app)")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -95,8 +105,10 @@ func runSearch(argv []string) error {
 	fs := flag.NewFlagSet("search", flag.ExitOnError)
 	var srcName string
 	var limit int
+	var asJSON bool
 	fs.StringVar(&srcName, "source", "", "limit to one source by name (e.g. mangadex)")
 	fs.IntVar(&limit, "limit", 10, "max results per source")
+	fs.BoolVar(&asJSON, "json", false, "emit results as JSON (used by the desktop app)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage:\n  tomo search [flags] <query>\n\nFlags:\n")
 		fs.PrintDefaults()
@@ -149,6 +161,28 @@ func runSearch(argv []string) error {
 	}
 	wg.Wait()
 
+	if asJSON {
+		type srcOut struct {
+			Source  string                `json:"source"`
+			Error   string                `json:"error,omitempty"`
+			Results []source.SearchResult `json:"results"`
+		}
+		sources := make([]srcOut, 0, len(outs))
+		for _, o := range outs {
+			so := srcOut{Source: o.name, Results: o.results}
+			if so.Results == nil {
+				so.Results = []source.SearchResult{}
+			}
+			if o.err != nil {
+				so.Error = o.err.Error()
+			}
+			sources = append(sources, so)
+		}
+		return json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+			"query": query, "sources": sources,
+		})
+	}
+
 	total := 0
 	for _, o := range outs {
 		fmt.Printf("\n%s:\n", o.name)
@@ -177,6 +211,8 @@ func run(cfg config, seriesURL string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	rep := newReporter(cfg.json)
+
 	src := source.For(seriesURL)
 	if src == nil {
 		return fmt.Errorf("no source matches %q\nrun `tomo` with no args to see supported sites", seriesURL)
@@ -186,7 +222,7 @@ func run(cfg config, seriesURL string) error {
 		md.Lang = cfg.lang
 	}
 
-	fmt.Printf("Source: %s\nFetching series…\n", src.Name())
+	rep.fetching(src.Name())
 	manga, err := src.Series(ctx, seriesURL)
 	if err != nil {
 		return err
@@ -197,18 +233,10 @@ func run(cfg config, seriesURL string) error {
 		return err
 	}
 	chapters := sel.Filter(manga.Chapters)
-
-	fmt.Printf("Series: %s\nChapters found: %d, selected: %d\n",
-		manga.Title, len(manga.Chapters), len(chapters))
+	rep.series(manga.Title, len(manga.Chapters), len(chapters))
 
 	if cfg.list {
-		for _, c := range chapters {
-			line := "  Ch. " + c.Number
-			if c.Title != "" {
-				line += " — " + c.Title
-			}
-			fmt.Println(line)
-		}
+		rep.chapters(chapters)
 		return nil
 	}
 	if len(chapters) == 0 {
@@ -219,9 +247,9 @@ func run(cfg config, seriesURL string) error {
 	if err := os.MkdirAll(seriesDir, 0o755); err != nil {
 		return err
 	}
-	fmt.Printf("Saving to: %s\n\n", seriesDir)
+	rep.saving(seriesDir)
 
-	return downloadAll(ctx, src, manga, resolveJobs(seriesDir, manga.Title, chapters), cfg)
+	return downloadAll(ctx, src, manga, resolveJobs(seriesDir, manga.Title, chapters), cfg, rep)
 }
 
 // job pairs a chapter with the unique output path it will be written to.
@@ -257,7 +285,7 @@ type result struct {
 	err     error
 }
 
-func downloadAll(ctx context.Context, src source.Source, manga *model.Manga, jobsList []job, cfg config) error {
+func downloadAll(ctx context.Context, src source.Source, manga *model.Manga, jobsList []job, cfg config, rep reporter) error {
 	jobs := make(chan job)
 	results := make(chan result)
 
@@ -300,27 +328,30 @@ func downloadAll(ctx context.Context, src source.Source, manga *model.Manga, job
 			canceled++
 		case r.err != nil:
 			failed++
-			fmt.Printf("  ✗ Ch. %s — %v\n", r.chapter.Number, r.err)
 		case r.skipped:
 			skipped++
-			fmt.Printf("  • Ch. %s — already downloaded\n", r.chapter.Number)
 		default:
 			done++
-			fmt.Printf("  ✓ Ch. %s\n", r.chapter.Number)
 		}
+		rep.chapterDone(r)
 	}
 
-	if ctx.Err() != nil {
-		fmt.Printf("\nInterrupted. %d downloaded, %d skipped before stopping.\n", done, skipped)
+	interrupted := ctx.Err() != nil
+	rep.summary(done, skipped, failed, total, interrupted)
+	if interrupted {
 		return nil
 	}
-	fmt.Printf("\nDone. %d downloaded, %d skipped, %d failed (of %d).\n",
-		done, skipped, failed, total)
 	if failed > 0 {
 		return fmt.Errorf("%d chapter(s) failed", failed)
 	}
 	return nil
 }
+
+// chapterAttempts is how many times a chapter is tried end-to-end. Re-resolving
+// the page list between attempts is what recovers from a bad page source — most
+// importantly a MangaDex@Home node that's missing a page, where a fresh
+// at-home request hands back a different (working) node.
+const chapterAttempts = 2
 
 func doChapter(ctx context.Context, src source.Source, manga *model.Manga, j job, cfg config) result {
 	ch := j.chapter
@@ -334,26 +365,39 @@ func doChapter(ctx context.Context, src source.Source, manga *model.Manga, j job
 		}
 	}
 
-	urls, err := src.Pages(ctx, ch)
-	if err != nil {
-		return result{chapter: ch, err: fmt.Errorf("list pages: %w", err)}
-	}
+	var lastErr error
+	for attempt := 0; attempt < chapterAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return result{chapter: ch, err: ctx.Err()}
+		}
+		// Re-resolving pages each attempt gives MangaDex a fresh at-home node and
+		// scrapers a fresh reader page.
+		urls, err := src.Pages(ctx, ch)
+		if err != nil {
+			lastErr = fmt.Errorf("list pages: %w", err)
+			continue
+		}
 
-	// Use the full chapter (reader) URL as the Referer — that's what a browser
-	// sends when loading the page images, so it satisfies both origin- and
-	// path-based hotlink checks. MangaDex chapters have no URL (API-served) and
-	// need no Referer.
-	res, err := download.Pages(ctx, urls, download.Options{
-		Concurrency: cfg.concurrency,
-		Retries:     cfg.retries,
-		Referer:     ch.URL,
-	})
-	if err != nil {
-		return result{chapter: ch, err: err}
+		// Use the full chapter (reader) URL as the Referer — that's what a browser
+		// sends when loading the page images, so it satisfies both origin- and
+		// path-based hotlink checks. MangaDex chapters have no URL (API-served)
+		// and need no Referer.
+		res, err := download.Pages(ctx, urls, download.Options{
+			Concurrency: cfg.concurrency,
+			Retries:     cfg.retries,
+			Referer:     ch.URL,
+		})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if err := cbz.Write(j.path, res.Pages); err != nil {
+			res.Cleanup()
+			lastErr = fmt.Errorf("write cbz: %w", err)
+			continue
+		}
+		res.Cleanup()
+		return result{chapter: ch}
 	}
-	defer res.Cleanup()
-	if err := cbz.Write(j.path, res.Pages); err != nil {
-		return result{chapter: ch, err: fmt.Errorf("write cbz: %w", err)}
-	}
-	return result{chapter: ch}
+	return result{chapter: ch, err: lastErr}
 }

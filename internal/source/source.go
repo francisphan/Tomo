@@ -24,10 +24,10 @@ type Source interface {
 // SearchResult is one hit from a title search: a series and the URL to feed
 // back into a download.
 type SearchResult struct {
-	Title  string
-	URL    string
-	Source string
-	Info   string // optional extra detail, e.g. "ongoing · 2018"
+	Title  string `json:"title"`
+	URL    string `json:"url"`
+	Source string `json:"source"`
+	Info   string `json:"info,omitempty"` // optional extra detail, e.g. "ongoing · 2018"
 }
 
 // Searcher is an optional capability: a Source that can find series by title.

@@ -8,16 +8,30 @@ Give it a series URL; Tomo detects the source, lists all chapters, downloads
 the pages concurrently, and writes one CBZ per chapter into a per-series folder
 ready to import.
 
-## Install / build
+## Install
+
+### Prebuilt binaries (no Go needed)
+
+Download the binary for your OS from the [Releases](https://github.com/francisphan/Tomo/releases)
+page — `tomo-darwin-arm64`, `tomo-darwin-amd64`, `tomo-windows-amd64.exe`, or
+`tomo-linux-amd64` — make it executable, and run it. No runtime to install.
+
+### Desktop app (GUI)
+
+Prefer a window over the terminal? A small **Tauri desktop app** lives in
+[`desktop/`](desktop/) — search, pick a series, choose chapters, watch progress.
+It bundles the same `tomo` engine as a sidecar. Grab the installer for your OS
+from Releases, or build it yourself (see [desktop/README.md](desktop/README.md)).
+
+### Build the CLI from source
 
 Requires Go 1.18+.
 
 ```bash
 cd Tomo
-go build -o tomo ./cmd/tomo
+go build -o tomo ./cmd/tomo            # single static binary
+bash scripts/build-cli.sh v1.0.0       # or cross-compile all OS targets into dist/
 ```
-
-This produces a single static `tomo` binary.
 
 ## Usage
 

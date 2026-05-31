@@ -1,0 +1,49 @@
+name: Release CLI
+
+# Build standalone tomo CLI binaries for every OS and attach them to the
+# GitHub Release when a version tag (e.g. v1.0.0) is pushed.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Test
+        run: go test ./...
+
+      - name: Cross-compile
+        run: bash scripts/build-cli.sh "${GITHUB_REF_NAME}"
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum tomo-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/tomo-*
+            dist/SHA256SUMS.txt
+
+      - name: Upload as workflow artifacts
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tomo-cli
+          path: dist/*
