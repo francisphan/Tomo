@@ -41,6 +41,7 @@ type config struct {
 	list           bool
 	overwrite      bool
 	json           bool
+	noFallback     bool
 }
 
 // version is overridden at build time via -ldflags "-X main.version=...".
@@ -70,6 +71,7 @@ func main() {
 	flag.BoolVar(&cfg.list, "list", false, "list chapters without downloading")
 	flag.BoolVar(&cfg.overwrite, "overwrite", false, "re-download chapters whose CBZ already exists")
 	flag.BoolVar(&cfg.json, "json", false, "emit machine-readable NDJSON progress (used by the desktop app)")
+	flag.BoolVar(&cfg.noFallback, "no-fallback", false, "don't auto-search other sources when the chosen one has nothing downloadable")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -228,6 +230,23 @@ func run(cfg config, seriesURL string) error {
 		return err
 	}
 
+	// Surface chapters the source can't download (e.g. licensed MangaDex
+	// chapters that live on an external reader), then — when nothing at all is
+	// downloadable here — look for the same series on another source.
+	if manga.Excluded > 0 {
+		reason := manga.ExcludedReason
+		if reason != "" {
+			reason = " (" + reason + ")"
+		}
+		rep.warn(fmt.Sprintf("%d chapter(s) on %s can't be downloaded%s",
+			manga.Excluded, src.Name(), reason))
+	}
+	if len(manga.Chapters) == 0 && !cfg.noFallback {
+		if fbSrc, fbManga := tryFallback(ctx, src, manga, rep); fbSrc != nil {
+			src, manga = fbSrc, fbManga
+		}
+	}
+
 	sel, err := selection.Parse(cfg.chapters)
 	if err != nil {
 		return err
@@ -250,6 +269,60 @@ func run(cfg config, seriesURL string) error {
 	rep.saving(seriesDir)
 
 	return downloadAll(ctx, src, manga, resolveJobs(seriesDir, manga.Title, chapters), cfg, rep)
+}
+
+// tryFallback looks for the same series on another searchable source when the
+// originally chosen source returned nothing downloadable — the common case
+// being an officially licensed series on MangaDex whose chapters all live on an
+// external reader. It searches every other searchable source by title, accepts
+// only an exact (normalized) title match that actually has downloadable
+// chapters, and returns that source and its fetched Manga. Returns (nil, nil)
+// when no usable alternative is found, leaving the caller's empty result intact.
+func tryFallback(ctx context.Context, orig source.Source, origManga *model.Manga, rep reporter) (source.Source, *model.Manga) {
+	title := strings.TrimSpace(origManga.Title)
+	if title == "" {
+		return nil, nil
+	}
+	for _, s := range source.All() {
+		if s.Name() == orig.Name() {
+			continue
+		}
+		se, ok := s.(source.Searcher)
+		if !ok {
+			continue
+		}
+		results, err := se.Search(ctx, title, 10)
+		if err != nil {
+			continue
+		}
+		for _, r := range results {
+			if !titleMatches(title, r.Title) {
+				continue
+			}
+			cand := source.For(r.URL)
+			if cand == nil {
+				continue
+			}
+			m, err := cand.Series(ctx, r.URL)
+			if err != nil || len(m.Chapters) == 0 {
+				continue
+			}
+			rep.fallback(orig.Name(), cand.Name(), m.Title, len(m.Chapters))
+			return cand, m
+		}
+	}
+	return nil, nil
+}
+
+// titleMatches reports whether two series titles refer to the same series,
+// comparing case- and whitespace-insensitively. An exact match (rather than a
+// substring) keeps "One Piece" from matching "One Piece Party".
+func titleMatches(a, b string) bool {
+	return normalizeTitle(a) == normalizeTitle(b)
+}
+
+func normalizeTitle(s string) string {
+	return strings.ToLower(strings.Join(strings.Fields(s), " "))
 }
 
 // job pairs a chapter with the unique output path it will be written to.

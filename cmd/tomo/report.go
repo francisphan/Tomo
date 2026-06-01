@@ -20,6 +20,11 @@ type reporter interface {
 	chapters(chs []model.Chapter)
 	chapterDone(r result)
 	summary(done, skipped, failed, total int, interrupted bool)
+	// warn surfaces a non-fatal advisory (e.g. chapters skipped as licensed).
+	warn(msg string)
+	// fallback announces switching to another source because the chosen one
+	// had nothing downloadable.
+	fallback(from, to, title string, found int)
 }
 
 func newReporter(asJSON bool) reporter {
@@ -39,6 +44,13 @@ func (textReporter) series(title string, found, selected int) {
 }
 
 func (textReporter) saving(dir string) { fmt.Printf("Saving to: %s\n\n", dir) }
+
+func (textReporter) warn(msg string) { fmt.Fprintf(os.Stderr, "warning: %s\n", msg) }
+
+func (textReporter) fallback(from, to, title string, found int) {
+	fmt.Printf("No downloadable chapters on %s — falling back to %s (%q: %d chapters).\n",
+		from, to, title, found)
+}
 
 func (textReporter) chapters(chs []model.Chapter) {
 	for _, c := range chs {
@@ -87,6 +99,16 @@ func (j *jsonReporter) series(title string, found, selected int) {
 
 func (j *jsonReporter) saving(dir string) {
 	j.emit(map[string]interface{}{"event": "saving", "dir": dir})
+}
+
+func (j *jsonReporter) warn(msg string) {
+	j.emit(map[string]interface{}{"event": "warning", "message": msg})
+}
+
+func (j *jsonReporter) fallback(from, to, title string, found int) {
+	j.emit(map[string]interface{}{
+		"event": "fallback", "from": from, "to": to, "title": title, "found": found,
+	})
 }
 
 func (j *jsonReporter) chapters(chs []model.Chapter) {

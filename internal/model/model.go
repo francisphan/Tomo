@@ -7,6 +7,13 @@ type Manga struct {
 	URL      string
 	Source   string
 	Chapters []Chapter
+
+	// Excluded counts chapters that exist upstream but this source cannot
+	// download — most notably officially licensed MangaDex chapters that are
+	// hosted on an external reader and carry no pages. ExcludedReason is a
+	// short human-readable explanation, shown to the user when Excluded > 0.
+	Excluded       int
+	ExcludedReason string
 }
 
 // Chapter is a single chapter of a series. ID and URL are source-specific

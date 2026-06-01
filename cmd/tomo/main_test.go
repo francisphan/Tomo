@@ -31,6 +31,24 @@ func TestResolveJobsDisambiguatesCollisions(t *testing.T) {
 	}
 }
 
+func TestTitleMatches(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"One Piece", "One Piece", true},
+		{"One Piece", "  one   piece ", true}, // case + whitespace insensitive
+		{"One Piece", "One Piece Party", false},
+		{"One Piece", "One Piece (Color)", false},
+		{"Solo Leveling", "solo leveling", true},
+	}
+	for _, c := range cases {
+		if got := titleMatches(c.a, c.b); got != c.want {
+			t.Errorf("titleMatches(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}
+
 func TestResolveJobsDeterministic(t *testing.T) {
 	chapters := []model.Chapter{{Number: "1"}, {Number: "2"}}
 	a := resolveJobs("/out/S", "S", chapters)
