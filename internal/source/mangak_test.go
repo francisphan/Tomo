@@ -47,6 +47,40 @@ func TestMKSearchHitMatchesSeriesNotChapters(t *testing.T) {
 	}
 }
 
+func TestMKParseChapters(t *testing.T) {
+	// Number comes from the name (keeping the decimal the slug "chapter-402-7"
+	// loses); specials/notices with no "Chapter N" get an empty Number and keep
+	// their name as the title.
+	body := []byte(`{"success":true,"data":{"chapters":[
+		{"id":"eDkAb5z8","url":"/haikyuu/chapter-402-7","name":"Chapter 402.7","slug":"chapter-402-7"},
+		{"id":"aaa","url":"/haikyuu/chapter-1-endings-and-beginnings","name":"Chapter 1","slug":"chapter-1-endings-and-beginnings"},
+		{"id":"bbb","url":"/haikyuu/special-nobuyuki-kais-nightmare","name":"Special. : Nobuyuki Kai's Nightmare","slug":"special-nobuyuki-kais-nightmare"},
+		{"id":"ccc","url":"","name":"Chapter 9 (no url, skipped)","slug":"chapter-9"}
+	]}}`)
+	chs, err := mkParseChapters(body)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(chs) != 3 {
+		t.Fatalf("got %d chapters, want 3 (the url-less entry must be dropped): %+v", len(chs), chs)
+	}
+	if chs[0].Number != "402.7" {
+		t.Errorf("decimal number from name: got %q want 402.7", chs[0].Number)
+	}
+	if chs[0].URL != "https://mangak.io/haikyuu/chapter-402-7" {
+		t.Errorf("reader URL not absolute: %q", chs[0].URL)
+	}
+	if chs[2].Number != "" || chs[2].Title != "Special. : Nobuyuki Kai's Nightmare" {
+		t.Errorf("special should have empty number and keep its name as title: %+v", chs[2])
+	}
+}
+
+func TestMKParseChaptersRejectsFailure(t *testing.T) {
+	if _, err := mkParseChapters([]byte(`{"success":false,"message":"Server error"}`)); err == nil {
+		t.Error("expected error on success=false response")
+	}
+}
+
 func TestMKImagesArrayExtraction(t *testing.T) {
 	page := `something {"images":["https://rx.qvzra.org/r/p/a/b/1.webp","https://rx.qvzrb.org/r/p/a/b/2.webp"]} more`
 	m := mkImages.FindStringSubmatch(page)
