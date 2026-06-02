@@ -132,7 +132,7 @@ func (w *WeebCentral) Series(ctx context.Context, seriesURL string) (*model.Mang
 		}
 		seen[cm[1]] = true
 
-		text := strings.TrimSpace(s.Text())
+		text := wcChapterText(s)
 		num := ""
 		if mt := wcChapNum.FindStringSubmatch(text); len(mt) == 2 {
 			num = mt[1]
@@ -150,6 +150,19 @@ func (w *WeebCentral) Series(ctx context.Context, seriesURL string) (*model.Mang
 		return nil, fmt.Errorf("no chapters found for %s (markup may have changed)", seriesURL)
 	}
 	return manga, nil
+}
+
+// wcChapterText extracts just the chapter label (e.g. "Chapter 303") from a
+// WeebCentral chapter anchor. A naive s.Text() also slurps the read-status
+// SVG icon (including its inline <style> CSS), an always-rendered-but-JS-hidden
+// "Last Read" marker (Alpine x-show), the "new chapter" marker, and a <time>
+// stamp — all of which leaked into CBZ filenames. We clone the node so we don't
+// mutate the shared document, drop the non-label elements, then collapse the
+// remaining whitespace.
+func wcChapterText(s *goquery.Selection) string {
+	sel := s.Clone()
+	sel.Find("svg, style, script, time, [x-show]").Remove()
+	return cleanText(sel.Text())
 }
 
 func (w *WeebCentral) Pages(ctx context.Context, ch model.Chapter) ([]string, error) {

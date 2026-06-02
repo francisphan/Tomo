@@ -93,8 +93,12 @@ func (m *MangaDex) Series(ctx context.Context, seriesURL string) (*model.Manga, 
 			return nil, fmt.Errorf("fetch chapter feed: %w", err)
 		}
 		for _, c := range feed.Data {
-			// Skip chapters hosted off-site (no pages on MangaDex).
+			// Skip chapters hosted off-site (no pages on MangaDex). Officially
+			// licensed series (e.g. One Piece) link out to a publisher's reader
+			// like MangaPlus, so every chapter lands here — count them so the
+			// caller can explain the empty result and fall back to another source.
 			if c.Attributes.ExternalURL != "" || c.Attributes.Pages == 0 {
+				manga.Excluded++
 				continue
 			}
 			manga.Chapters = append(manga.Chapters, model.Chapter{
@@ -118,6 +122,9 @@ func (m *MangaDex) Series(ctx context.Context, seriesURL string) (*model.Manga, 
 	}
 
 	manga.Chapters = dedupeByNumber(manga.Chapters)
+	if manga.Excluded > 0 {
+		manga.ExcludedReason = "hosted on an external/official reader (e.g. MangaPlus) with no pages on MangaDex"
+	}
 	return manga, nil
 }
 

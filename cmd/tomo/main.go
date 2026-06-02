@@ -16,12 +16,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"tomo/internal/cbz"
 	"tomo/internal/download"
@@ -41,6 +43,7 @@ type config struct {
 	list           bool
 	overwrite      bool
 	json           bool
+	noFallback     bool
 }
 
 // version is overridden at build time via -ldflags "-X main.version=...".
@@ -70,6 +73,7 @@ func main() {
 	flag.BoolVar(&cfg.list, "list", false, "list chapters without downloading")
 	flag.BoolVar(&cfg.overwrite, "overwrite", false, "re-download chapters whose CBZ already exists")
 	flag.BoolVar(&cfg.json, "json", false, "emit machine-readable NDJSON progress (used by the desktop app)")
+	flag.BoolVar(&cfg.noFallback, "no-fallback", false, "don't auto-search other sources when the chosen one has nothing downloadable")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -228,28 +232,140 @@ func run(cfg config, seriesURL string) error {
 		return err
 	}
 
-	sel, err := selection.Parse(cfg.chapters)
-	if err != nil {
-		return err
+	// Surface chapters the source can't download (e.g. licensed MangaDex
+	// chapters that live on an external reader), then — when nothing at all is
+	// downloadable here — look for the same series on another source.
+	if manga.Excluded > 0 {
+		reason := manga.ExcludedReason
+		if reason != "" {
+			reason = " (" + reason + ")"
+		}
+		rep.warn(fmt.Sprintf("%d chapter(s) on %s can't be downloaded%s",
+			manga.Excluded, src.Name(), reason))
 	}
-	chapters := sel.Filter(manga.Chapters)
-	rep.series(manga.Title, len(manga.Chapters), len(chapters))
+	if len(manga.Chapters) == 0 && !cfg.noFallback {
+		if fbSrc, fbManga := tryFallback(ctx, src, manga, rep, map[string]bool{src.Name(): true}); fbSrc != nil {
+			src, manga = fbSrc, fbManga
+		}
+	}
 
+	// `-list` just prints the chapter list for the chosen source; no download or
+	// fallback.
 	if cfg.list {
+		sel, err := selection.Parse(cfg.chapters)
+		if err != nil {
+			return err
+		}
+		chapters := sel.Filter(manga.Chapters)
+		rep.series(manga.Title, len(manga.Chapters), len(chapters))
 		rep.chapters(chapters)
 		return nil
 	}
+
+	// Download, and if a source fails to deliver a single chapter (e.g. a
+	// MangaDex@Home node that 404s every page during a bad window), fall back to
+	// the same series on another source rather than leaving the user with
+	// nothing. A partial success is left alone — switching sources mid-series
+	// would risk inconsistent chapter numbering.
+	tried := map[string]bool{}
+	for {
+		tried[src.Name()] = true
+		done, failed, interrupted, err := downloadFrom(ctx, src, manga, cfg, rep)
+		if err != nil {
+			return err
+		}
+		if interrupted {
+			return nil
+		}
+		if failed > 0 && done == 0 && !cfg.noFallback {
+			if fbSrc, fbManga := tryFallback(ctx, src, manga, rep, tried); fbSrc != nil {
+				src, manga = fbSrc, fbManga
+				continue
+			}
+		}
+		if failed > 0 {
+			return fmt.Errorf("%d chapter(s) failed", failed)
+		}
+		return nil
+	}
+}
+
+// downloadFrom selects the requested chapters from one source and downloads
+// them, returning per-source counts so run can decide whether to fall back.
+func downloadFrom(ctx context.Context, src source.Source, manga *model.Manga, cfg config, rep reporter) (done, failed int, interrupted bool, err error) {
+	sel, err := selection.Parse(cfg.chapters)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	chapters := sel.Filter(manga.Chapters)
+	rep.series(manga.Title, len(manga.Chapters), len(chapters))
 	if len(chapters) == 0 {
-		return fmt.Errorf("no chapters selected")
+		return 0, 0, false, fmt.Errorf("no chapters selected")
 	}
 
 	seriesDir := filepath.Join(cfg.out, naming.Sanitize(manga.Title))
 	if err := os.MkdirAll(seriesDir, 0o755); err != nil {
-		return err
+		return 0, 0, false, err
 	}
 	rep.saving(seriesDir)
 
-	return downloadAll(ctx, src, manga, resolveJobs(seriesDir, manga.Title, chapters), cfg, rep)
+	done, failed, interrupted = downloadAll(ctx, src, manga, resolveJobs(seriesDir, manga.Title, chapters), cfg, rep)
+	return done, failed, interrupted, nil
+}
+
+// tryFallback looks for the same series on another searchable source when the
+// chosen one can't deliver — either it listed nothing downloadable (an
+// officially licensed series on MangaDex whose chapters all live on an external
+// reader) or every chapter failed to download (e.g. a flaky MangaDex@Home node
+// 404ing every page). It searches every source not already in tried by title,
+// accepts only an exact (normalized) title match that actually has downloadable
+// chapters, and returns that source and its fetched Manga. Returns (nil, nil)
+// when no usable alternative is found, leaving the caller's result intact.
+func tryFallback(ctx context.Context, orig source.Source, origManga *model.Manga, rep reporter, tried map[string]bool) (source.Source, *model.Manga) {
+	title := strings.TrimSpace(origManga.Title)
+	if title == "" {
+		return nil, nil
+	}
+	for _, s := range source.All() {
+		if tried[s.Name()] {
+			continue
+		}
+		se, ok := s.(source.Searcher)
+		if !ok {
+			continue
+		}
+		results, err := se.Search(ctx, title, 10)
+		if err != nil {
+			continue
+		}
+		for _, r := range results {
+			if !titleMatches(title, r.Title) {
+				continue
+			}
+			cand := source.For(r.URL)
+			if cand == nil {
+				continue
+			}
+			m, err := cand.Series(ctx, r.URL)
+			if err != nil || len(m.Chapters) == 0 {
+				continue
+			}
+			rep.fallback(orig.Name(), cand.Name(), m.Title, len(m.Chapters))
+			return cand, m
+		}
+	}
+	return nil, nil
+}
+
+// titleMatches reports whether two series titles refer to the same series,
+// comparing case- and whitespace-insensitively. An exact match (rather than a
+// substring) keeps "One Piece" from matching "One Piece Party".
+func titleMatches(a, b string) bool {
+	return normalizeTitle(a) == normalizeTitle(b)
+}
+
+func normalizeTitle(s string) string {
+	return strings.ToLower(strings.Join(strings.Fields(s), " "))
 }
 
 // job pairs a chapter with the unique output path it will be written to.
@@ -285,7 +401,11 @@ type result struct {
 	err     error
 }
 
-func downloadAll(ctx context.Context, src source.Source, manga *model.Manga, jobsList []job, cfg config, rep reporter) error {
+// downloadAll runs the chapter jobs and reports a per-source summary. It returns
+// how many chapters were downloaded and failed (and whether the run was
+// interrupted) so the caller can decide whether a wholesale failure warrants
+// falling back to another source.
+func downloadAll(ctx context.Context, src source.Source, manga *model.Manga, jobsList []job, cfg config, rep reporter) (done, failed int, interrupted bool) {
 	jobs := make(chan job)
 	results := make(chan result)
 
@@ -320,7 +440,7 @@ func downloadAll(ctx context.Context, src source.Source, manga *model.Manga, job
 		close(results)
 	}()
 
-	var done, skipped, failed, canceled int
+	var skipped, canceled int
 	total := len(jobsList)
 	for r := range results {
 		switch {
@@ -336,22 +456,24 @@ func downloadAll(ctx context.Context, src source.Source, manga *model.Manga, job
 		rep.chapterDone(r)
 	}
 
-	interrupted := ctx.Err() != nil
+	interrupted = ctx.Err() != nil
 	rep.summary(done, skipped, failed, total, interrupted)
-	if interrupted {
-		return nil
-	}
-	if failed > 0 {
-		return fmt.Errorf("%d chapter(s) failed", failed)
-	}
-	return nil
+	return done, failed, interrupted
 }
 
 // chapterAttempts is how many times a chapter is tried end-to-end. Re-resolving
 // the page list between attempts is what recovers from a bad page source — most
-// importantly a MangaDex@Home node that's missing a page, where a fresh
-// at-home request hands back a different (working) node.
-const chapterAttempts = 2
+// importantly a MangaDex@Home node that 404s its pages during a bad window,
+// where a fresh at-home request (after a short pause) hands back a working node.
+// Such nodes can stay bad for more than one retry, so we try a few times.
+const chapterAttempts = 4
+
+// chapterRetryBackoff returns how long to wait before re-attempting a chapter,
+// growing with each attempt and jittered so concurrent chapter workers don't
+// re-resolve and re-hammer the same node in lockstep.
+func chapterRetryBackoff(attempt int) time.Duration {
+	return time.Duration(attempt)*800*time.Millisecond + time.Duration(rand.Intn(400))*time.Millisecond
+}
 
 func doChapter(ctx context.Context, src source.Source, manga *model.Manga, j job, cfg config) result {
 	ch := j.chapter
@@ -369,6 +491,15 @@ func doChapter(ctx context.Context, src source.Source, manga *model.Manga, j job
 	for attempt := 0; attempt < chapterAttempts; attempt++ {
 		if ctx.Err() != nil {
 			return result{chapter: ch, err: ctx.Err()}
+		}
+		// Pause before a retry so a transiently-bad MangaDex@Home node has time to
+		// recover (or hand back a different node), aborting promptly on Ctrl-C.
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return result{chapter: ch, err: ctx.Err()}
+			case <-time.After(chapterRetryBackoff(attempt)):
+			}
 		}
 		// Re-resolving pages each attempt gives MangaDex a fresh at-home node and
 		// scrapers a fresh reader page.
