@@ -23,7 +23,7 @@ type reporter interface {
 	// warn surfaces a non-fatal advisory (e.g. chapters skipped as licensed).
 	warn(msg string)
 	// fallback announces switching to another source because the chosen one
-	// had nothing downloadable.
+	// couldn't deliver — it had nothing downloadable, or every chapter failed.
 	fallback(from, to, title string, found int)
 }
 
@@ -48,7 +48,7 @@ func (textReporter) saving(dir string) { fmt.Printf("Saving to: %s\n\n", dir) }
 func (textReporter) warn(msg string) { fmt.Fprintf(os.Stderr, "warning: %s\n", msg) }
 
 func (textReporter) fallback(from, to, title string, found int) {
-	fmt.Printf("No downloadable chapters on %s — falling back to %s (%q: %d chapters).\n",
+	fmt.Printf("Couldn't get this series from %s — falling back to %s (%q: %d chapters).\n",
 		from, to, title, found)
 }
 
