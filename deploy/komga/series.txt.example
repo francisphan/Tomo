@@ -1,0 +1,7 @@
+# Series to keep refreshed by refresh-library.sh — one URL per line.
+# Blank lines and anything after a # are ignored. Paste the same series URLs
+# you'd hand to `tomo` directly. Tomo only downloads chapters you don't have yet.
+
+# https://mangadex.org/title/<id>/<slug>
+# https://asuracomics.com/series/<slug>
+# https://weebcentral.com/series/<id>/<slug>

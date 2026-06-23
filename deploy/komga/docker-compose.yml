@@ -1,0 +1,30 @@
+# Komga — self-hosted manga/comic server for your Tomo CBZ library.
+#
+# It reads the very same CBZ files Tomo writes and serves them to Tachimanga
+# (and any OPDS / Tachiyomi-family reader) over your private Tailscale network.
+#
+# Quick start:
+#   1. Copy .env.example to .env and point MANGA_LIBRARY at your CBZ folder.
+#   2. docker compose up -d
+#   3. Open http://localhost:25600, create an admin user, add /data as a library.
+#
+# Full walkthrough (Tailscale + Tachimanga) lives in README.md next to this file.
+
+services:
+  komga:
+    image: gotson/komga:latest
+    container_name: komga
+    # "uid:gid" of the account that owns the library files (run `id` to find yours).
+    # Komga then reads/writes as that user instead of root. Remove this line to run as root.
+    user: "1000:1000"
+    ports:
+      - "25600:25600"
+    volumes:
+      # Komga's own database, settings, and generated thumbnails. Keep & back this up.
+      - ./config:/config
+      # Your Tomo CBZ library. Read-only (:ro) is all Komga needs to serve it —
+      # drop the :ro if you later want Komga to write ComicInfo.xml metadata back.
+      - ${MANGA_LIBRARY:-./library}:/data:ro
+    environment:
+      - TZ=America/New_York   # set to your timezone
+    restart: unless-stopped
