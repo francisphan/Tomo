@@ -32,6 +32,14 @@ func (m *MangaDex) Matches(u string) bool {
 
 var mdUUID = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
 
+// mdHeaders identifies Tomo to the MangaDex API. MangaDex requires API clients
+// to send a descriptive User-Agent, and its edge rejects browser UAs that
+// don't come from a real browser (HTML 400 error page) — so the shared
+// Chrome-mimicking UA the scraper sources need must not be used here.
+var mdHeaders = map[string]string{
+	"User-Agent": "Tomo/1.0 (+https://github.com/francisphan/Tomo)",
+}
+
 func (m *MangaDex) lang() string {
 	if m.Lang == "" {
 		return "en"
@@ -54,7 +62,7 @@ func (m *MangaDex) Series(ctx context.Context, seriesURL string) (*model.Manga, 
 			} `json:"attributes"`
 		} `json:"data"`
 	}
-	if err := httpx.GetJSON(ctx, "https://api.mangadex.org/manga/"+id, nil, &meta); err != nil {
+	if err := httpx.GetJSON(ctx, "https://api.mangadex.org/manga/"+id, mdHeaders, &meta); err != nil {
 		return nil, fmt.Errorf("fetch manga: %w", err)
 	}
 	title := pickTitle(meta.Data.Attributes.Title, meta.Data.Attributes.AltTitles, m.lang())
@@ -89,7 +97,7 @@ func (m *MangaDex) Series(ctx context.Context, seriesURL string) (*model.Manga, 
 			Total int `json:"total"`
 		}
 		endpoint := "https://api.mangadex.org/manga/" + id + "/feed?" + q.Encode()
-		if err := httpx.GetJSON(ctx, endpoint, nil, &feed); err != nil {
+		if err := httpx.GetJSON(ctx, endpoint, mdHeaders, &feed); err != nil {
 			return nil, fmt.Errorf("fetch chapter feed: %w", err)
 		}
 		for _, c := range feed.Data {
@@ -155,7 +163,7 @@ func (m *MangaDex) Search(ctx context.Context, query string, limit int) ([]Searc
 			} `json:"attributes"`
 		} `json:"data"`
 	}
-	if err := httpx.GetJSON(ctx, "https://api.mangadex.org/manga?"+q.Encode(), nil, &resp); err != nil {
+	if err := httpx.GetJSON(ctx, "https://api.mangadex.org/manga?"+q.Encode(), mdHeaders, &resp); err != nil {
 		return nil, err
 	}
 
@@ -186,7 +194,7 @@ func (m *MangaDex) Pages(ctx context.Context, ch model.Chapter) ([]string, error
 			Data []string `json:"data"`
 		} `json:"chapter"`
 	}
-	if err := httpx.GetJSON(ctx, "https://api.mangadex.org/at-home/server/"+ch.ID, nil, &ah); err != nil {
+	if err := httpx.GetJSON(ctx, "https://api.mangadex.org/at-home/server/"+ch.ID, mdHeaders, &ah); err != nil {
 		return nil, fmt.Errorf("at-home server: %w", err)
 	}
 	if ah.BaseURL == "" || ah.Chapter.Hash == "" {
