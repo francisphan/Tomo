@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -45,6 +46,55 @@ func TestTitleMatches(t *testing.T) {
 	for _, c := range cases {
 		if got := titleMatches(c.a, c.b); got != c.want {
 			t.Errorf("titleMatches(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+func TestExistingChapterNumbers(t *testing.T) {
+	// A library fed from more than one source holds the same chapter under
+	// different names: MangaDex adds a chapter-title suffix, Weeb Central
+	// doesn't, and the series prefix can differ too. All must count as the
+	// same chapter, while decimal sub-chapters stay distinct.
+	dir := t.TempDir()
+	for _, f := range []string{
+		"Blue Lock - Chapter 0001 - Dream.cbz",
+		"Blue Lock - Chapter 0002.cbz",
+		"Blue Lock - Chapter 0002.1.cbz",
+		"Sousou no Frieren - Chapter 0003.cbz", // other series prefix, same folder
+		"Blue Lock - Chapter 0085 - 8.cbz",     // numeric-looking chapter title
+		"not-a-chapter.txt",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, f), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	nums := existingChapterNumbers(dir)
+	for _, want := range []string{"0001", "0002", "0002.1", "0003", "0085"} {
+		if !nums[want] {
+			t.Errorf("chapter %s not detected in %v", want, nums)
+		}
+	}
+	if nums["0008"] {
+		t.Errorf("numeric chapter title '8' misread as chapter 0008: %v", nums)
+	}
+	if len(nums) != 5 {
+		t.Errorf("got %d chapters, want 5: %v", len(nums), nums)
+	}
+}
+
+func TestMarkExisting(t *testing.T) {
+	jobs := []job{
+		{chapter: model.Chapter{Number: "1"}},    // exists as "0001"
+		{chapter: model.Chapter{Number: "2.1"}},  // exists as "0002.1"
+		{chapter: model.Chapter{Number: "2"}},    // new
+		{chapter: model.Chapter{Number: "10.5"}}, // new
+	}
+	markExisting(jobs, map[string]bool{"0001": true, "0002.1": true})
+	want := []bool{true, true, false, false}
+	for i, j := range jobs {
+		if j.exists != want[i] {
+			t.Errorf("job %d (ch %s): exists = %v, want %v", i, j.chapter.Number, j.exists, want[i])
 		}
 	}
 }

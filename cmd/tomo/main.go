@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -35,6 +36,7 @@ import (
 
 type config struct {
 	out            string
+	name           string
 	chapters       string
 	lang           string
 	concurrency    int
@@ -65,6 +67,7 @@ func main() {
 
 	cfg := config{}
 	flag.StringVar(&cfg.out, "out", "./manga", "output directory (a per-series subfolder is created)")
+	flag.StringVar(&cfg.name, "name", "", "series name to use for the folder and file names (default: the source's title; use to keep naming stable across sources)")
 	flag.StringVar(&cfg.chapters, "chapters", "", `chapters to fetch, e.g. "1-20,25,40-" (default: all)`)
 	flag.StringVar(&cfg.lang, "lang", "en", "translated language code (MangaDex only)")
 	flag.IntVar(&cfg.concurrency, "concurrency", 8, "parallel image downloads per chapter")
@@ -298,18 +301,26 @@ func downloadFrom(ctx context.Context, src source.Source, manga *model.Manga, cf
 		return 0, 0, false, err
 	}
 	chapters := sel.Filter(manga.Chapters)
-	rep.series(manga.Title, len(manga.Chapters), len(chapters))
+	title := cfg.name
+	if title == "" {
+		title = manga.Title
+	}
+	rep.series(title, len(manga.Chapters), len(chapters))
 	if len(chapters) == 0 {
 		return 0, 0, false, fmt.Errorf("no chapters selected")
 	}
 
-	seriesDir := filepath.Join(cfg.out, naming.Sanitize(manga.Title))
+	seriesDir := filepath.Join(cfg.out, naming.Sanitize(title))
 	if err := os.MkdirAll(seriesDir, 0o755); err != nil {
 		return 0, 0, false, err
 	}
 	rep.saving(seriesDir)
 
-	done, failed, interrupted = downloadAll(ctx, src, manga, resolveJobs(seriesDir, manga.Title, chapters), cfg, rep)
+	jobs := resolveJobs(seriesDir, title, chapters)
+	if !cfg.overwrite {
+		markExisting(jobs, existingChapterNumbers(seriesDir))
+	}
+	done, failed, interrupted = downloadAll(ctx, src, manga, jobs, cfg, rep)
 	return done, failed, interrupted, nil
 }
 
@@ -369,9 +380,48 @@ func normalizeTitle(s string) string {
 }
 
 // job pairs a chapter with the unique output path it will be written to.
+// exists marks chapters already on disk under a different file name (see
+// markExisting), which are skipped just like an exact-path match.
 type job struct {
 	chapter model.Chapter
 	path    string
+	exists  bool
+}
+
+// cbzChapterNum extracts the chapter number from any CBZ following the
+// "<Series> - Chapter <number>[ - <title>].cbz" layout, whatever the series
+// prefix or title suffix.
+var cbzChapterNum = regexp.MustCompile(`(?i) - chapter ([0-9]+(?:\.[0-9]+)?)(?: - .*)?\.cbz$`)
+
+// existingChapterNumbers scans seriesDir and returns the padded chapter
+// numbers that already have a CBZ. Earlier runs may have used another source
+// with a different series title or chapter-title suffix in the file names —
+// matching on the chapter number keeps a refresh from re-downloading those
+// chapters as duplicates.
+func existingChapterNumbers(seriesDir string) map[string]bool {
+	entries, err := os.ReadDir(seriesDir)
+	if err != nil {
+		return nil
+	}
+	nums := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if m := cbzChapterNum.FindStringSubmatch(e.Name()); m != nil {
+			nums[naming.PadNumber(m[1], 4)] = true
+		}
+	}
+	return nums
+}
+
+// markExisting flags jobs whose chapter number already has a CBZ on disk.
+func markExisting(jobs []job, existing map[string]bool) {
+	for i := range jobs {
+		if existing[naming.PadNumber(jobs[i].chapter.Number, 4)] {
+			jobs[i].exists = true
+		}
+	}
 }
 
 // resolveJobs assigns every chapter a unique CBZ path within seriesDir. Two
@@ -482,6 +532,9 @@ func doChapter(ctx context.Context, src source.Source, manga *model.Manga, j job
 	}
 
 	if !cfg.overwrite {
+		if j.exists {
+			return result{chapter: ch, skipped: true}
+		}
 		if _, err := os.Stat(j.path); err == nil {
 			return result{chapter: ch, skipped: true}
 		}
