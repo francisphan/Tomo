@@ -112,22 +112,49 @@ Want it hands-off? List the ongoing series you want to track in `series.txt`
 it fetches new chapters for each into your library. Tomo writes new chapters
 only, so every pass is cheap and idempotent.
 
-```bash
-cp series.txt.example series.txt
-# add your series URLs, one per line, then try it once by hand:
-MANGA_LIBRARY=/srv/manga ./refresh-library.sh
+If you know which day of the week a series updates, tag the URL with it and the
+daily run will only check that series on its day. Untagged series are checked
+every run — right for irregular schedules.
+
+```
+https://mangadex.org/title/<id>/shiba-inu-rooms     wed        # weekly, Wednesdays
+https://weebcentral.com/series/<id>/Blue-Lock       tue        # weekly, Tuesdays
+https://mangadex.org/title/<id>/gakuen-babysitters             # irregular → every run
+https://weebcentral.com/series/<id>/Sousou-no-Frieren  tue  Sousou no Frieren
 ```
 
-Once that works, schedule it — e.g. every morning at 7am, logging to a file:
+The last line shows the optional third field: a series-name override (passed to
+`tomo -name`), for when a source titles the series differently from the folder
+your library already uses — without it you'd get a second folder and a full
+re-download. Tomo also matches existing chapters by number, not exact file
+name, so a library whose history came from one source refreshes cleanly from
+another even when their file naming differs.
+
+A good way to find a series' day: look at the timestamps of its last few
+chapters on the source site — weekly series land on the same weekday like
+clockwork. Mind timezones: schedule the cron run *after* the usual release hour
+in your local time, or a Tuesday chapter that drops at 15:00 UTC will be missed
+by a Tuesday-morning run and wait a whole week.
+
+```bash
+cp series.txt.example series.txt
+# add your series URLs, then try a full pass by hand (ignores day tags):
+MANGA_LIBRARY=/srv/manga FORCE_ALL=1 ./refresh-library.sh
+```
+
+Once that works, schedule it daily — e.g. every evening at 9pm, logging to a file:
 
 ```cron
-0 7 * * *  MANGA_LIBRARY=/srv/manga LOG_FILE=/var/log/tomo-refresh.log /path/to/Tomo/deploy/komga/refresh-library.sh
+0 21 * * *  MANGA_LIBRARY=/srv/manga LOG_FILE=/var/log/tomo-refresh.log /path/to/Tomo/deploy/komga/refresh-library.sh
 ```
 
 The script also reads its config (`MANGA_LIBRARY`, `TOMO_BIN`, `SERIES_FILE`,
 `LOG_FILE`) from the `.env` file in this folder, so if you set them there you can
 drop them from the cron line. It exits non-zero if any series failed, so cron
-mail / your monitoring will surface a bad run.
+mail / your monitoring will surface a bad run. Each run logs how many chapters
+each series gained and a summary line (`N checked, M skipped (not their day),
+F failed, T new chapters`), so the log doubles as an audit trail of what arrived
+when.
 
 ## Maintenance
 
