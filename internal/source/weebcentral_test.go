@@ -73,10 +73,10 @@ func TestWCCustomLabelNumbers(t *testing.T) {
 		{"Mission 12", "12"},
 		{"Mission 112.2", "112.2"},
 		{"Hunt 7", "7"},
-		{"Chapter 208", "208"},          // primary regex still wins
-		{"S2 Chapter 44", "44"},         // prefix noise before "Chapter"
-		{"One Shot", ""},                // no number → unnumbered as before
-		{"Epilogue Part Two", ""},       // words only, no trailing number
+		{"Chapter 208", "208"},    // primary regex still wins
+		{"S2 Chapter 44", "44"},   // prefix noise before "Chapter"
+		{"One Shot", ""},          // no number → unnumbered as before
+		{"Epilogue Part Two", ""}, // words only, no trailing number
 	}
 	for _, c := range cases {
 		num := ""
