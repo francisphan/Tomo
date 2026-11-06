@@ -37,6 +37,12 @@ var (
 	wcSeriesID  = regexp.MustCompile(`/series/([^/?#]+)`)
 	wcChapterID = regexp.MustCompile(`/chapters/([^/?#]+)`)
 	wcChapNum   = regexp.MustCompile(`(?i)(?:chapter|episode|ch\.?)\s*([\d.]+)`)
+	// wcLabelNum handles series whose chapter labels use a custom prefix
+	// instead of "Chapter" — e.g. "Mission 12" (Spy x Family) or "Hunt 7"
+	// (Ichi the Witch). It only fires when the whole label is
+	// "<words> <number>", so real titles that merely contain digits
+	// somewhere don't get misparsed.
+	wcLabelNum = regexp.MustCompile(`(?i)^[a-z][a-z .'&-]*\s(\d+(?:\.\d+)?)$`)
 )
 
 const wcBase = "https://weebcentral.com"
@@ -135,6 +141,8 @@ func (w *WeebCentral) Series(ctx context.Context, seriesURL string) (*model.Mang
 		text := wcChapterText(s)
 		num := ""
 		if mt := wcChapNum.FindStringSubmatch(text); len(mt) == 2 {
+			num = mt[1]
+		} else if mt := wcLabelNum.FindStringSubmatch(text); len(mt) == 2 {
 			num = mt[1]
 		}
 		manga.Chapters = append(manga.Chapters, model.Chapter{
