@@ -219,7 +219,7 @@ window.ARCS = [
       { part: 'Part 6 · The Challenge', name: 'Jiwoo vs. Siun', start: 355, end: 363 },
       { part: 'Part 6 · The Challenge', name: 'Iodore & Gharath', start: 364, end: 388 },
       { part: 'Part 6 · The Challenge', name: 'Jiwoo vs. Jurion Patrick', start: 389, end: 401 },
-      { part: 'Part 7', name: 'The Patrick Family, Pt. 2', start: 402, end: null },
+      { part: 'Part 7 · ongoing, not yet titled', name: 'The Patrick Family, Pt. 2', start: 402, end: null },
     ],
   },
   {
