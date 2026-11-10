@@ -38,6 +38,7 @@ bash scripts/build-cli.sh v1.0.0       # or cross-compile all OS targets into di
 ```bash
 tomo [flags] <series-url>      # download a series
 tomo search [flags] <query>    # find a series by title
+tomo pad <dir|cbz>...          # add the -pad-start blank page to chapters already downloaded
 ```
 
 ### Search
@@ -92,10 +93,20 @@ Run `tomo` with no arguments to see all flags and supported sites.
 | `-retries` | `3` | Retry attempts per failed image |
 | `-list` | `false` | List chapters without downloading |
 | `-overwrite` | `false` | Re-download chapters whose CBZ already exists |
+| `-pad-start` | `false` | Add a blank black page at the start of each chapter, so double-page spreads line up when reading two pages at a time (e.g. iPad landscape) |
 
 Re-running is safe and resumable: chapters whose CBZ already exists are skipped
 unless `-overwrite` is set. A chapter that fails to download leaves no partial
 file behind (CBZs are written atomically), so just run the command again.
+
+### Two-page reading (spreads)
+
+In landscape on an iPad, the reader shows two pages side by side. If a
+chapter opens with a single title page, every double-page spread after it gets
+split across two screens. `-pad-start` puts a blank black page in front so the
+spreads pair up. Use it for page-based manga, not long-strip manhwa. To pad
+chapters you already have, run `tomo pad ~/Manga/<Series>`; chapters that
+already have the blank page are skipped.
 
 ## Supported sites
 

@@ -16,6 +16,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -46,6 +47,7 @@ type config struct {
 	overwrite      bool
 	json           bool
 	noFallback     bool
+	padStart       bool
 }
 
 // version is overridden at build time via -ldflags "-X main.version=...".
@@ -65,6 +67,14 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "pad" {
+		if err := runPad(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	cfg := config{}
 	flag.StringVar(&cfg.out, "out", "./manga", "output directory (a per-series subfolder is created)")
 	flag.StringVar(&cfg.name, "name", "", "series name to use for the folder and file names (default: the source's title; use to keep naming stable across sources)")
@@ -77,6 +87,7 @@ func main() {
 	flag.BoolVar(&cfg.overwrite, "overwrite", false, "re-download chapters whose CBZ already exists")
 	flag.BoolVar(&cfg.json, "json", false, "emit machine-readable NDJSON progress (used by the desktop app)")
 	flag.BoolVar(&cfg.noFallback, "no-fallback", false, "don't auto-search other sources when the chosen one has nothing downloadable")
+	flag.BoolVar(&cfg.padStart, "pad-start", false, "add a blank black page at the start of each chapter so double-page spreads line up in two-page reading")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -96,13 +107,48 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "Tomo — download manga/manhwa chapters as CBZ for Tachimanga\n\n")
 	fmt.Fprintf(os.Stderr, "Usage:\n")
 	fmt.Fprintf(os.Stderr, "  tomo [flags] <series-url>      download a series\n")
-	fmt.Fprintf(os.Stderr, "  tomo search [flags] <query>    find a series by title\n\n")
+	fmt.Fprintf(os.Stderr, "  tomo search [flags] <query>    find a series by title\n")
+	fmt.Fprintf(os.Stderr, "  tomo pad <dir|cbz>...          add the -pad-start blank page to CBZs already downloaded\n\n")
 	fmt.Fprintf(os.Stderr, "Download flags:\n")
 	flag.PrintDefaults()
 	fmt.Fprintf(os.Stderr, "\nSupported sites:\n")
 	for _, s := range source.All() {
 		fmt.Fprintf(os.Stderr, "  - %s\n", s.Name())
 	}
+}
+
+// runPad implements `tomo pad`: it gives chapters downloaded without
+// -pad-start the same leading blank page. Directories are searched for CBZs
+// recursively; chapters that already have it are left alone, so it's safe to
+// re-run.
+func runPad(argv []string) error {
+	if len(argv) == 0 {
+		return fmt.Errorf("usage: tomo pad <series-dir|chapter.cbz>...")
+	}
+	var padded, skipped int
+	for _, arg := range argv {
+		err := filepath.WalkDir(arg, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.EqualFold(filepath.Ext(path), ".cbz") {
+				return err
+			}
+			ok, err := cbz.Pad(path)
+			if err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+			if ok {
+				padded++
+				fmt.Println("padded:", path)
+			} else {
+				skipped++
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	fmt.Printf("%d padded, %d already padded\n", padded, skipped)
+	return nil
 }
 
 // runSearch implements `tomo search`. It queries every source that supports
@@ -575,7 +621,7 @@ func doChapter(ctx context.Context, src source.Source, manga *model.Manga, j job
 			lastErr = err
 			continue
 		}
-		if err := cbz.Write(j.path, res.Pages); err != nil {
+		if err := cbz.Write(j.path, res.Pages, cfg.padStart); err != nil {
 			res.Cleanup()
 			lastErr = fmt.Errorf("write cbz: %w", err)
 			continue

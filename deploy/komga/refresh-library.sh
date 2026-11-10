@@ -6,7 +6,9 @@
 # cheap and idempotent — it just appends whatever is new, then Komga picks the
 # files up on its next scan.
 #
-# Each series.txt line is:  URL [days [name...]]
+# Each series.txt line is:  URL [-flags...] [days [name...]]
+#   flags extra tomo flags for this series, e.g. -pad-start for page-based
+#         manga read two pages at a time.
 #   days  weekday(s) the series updates (mon..sun, comma-separated, or
 #         "daily"). Run this daily from cron and a series tagged "tue" is only
 #         checked on Tuesdays; untagged (or "daily") series are checked every
@@ -94,11 +96,18 @@ main() {
 
   local failures=0 checked=0 skipped=0 new_total=0
   local line entry url days name rest first before after new
+  local -a flags
   while IFS= read -r line || [[ -n "$line" ]]; do
     entry="$(trim "${line%%#*}")"   # drop inline comments, then trim
     [[ -z "$entry" ]] && continue
     url="${entry%%[[:space:]]*}"    # field 1: the series URL
     rest="$(trim "${entry#"$url"}")"
+    flags=()
+    while [[ "$rest" == -* ]]; do   # leading -flags go straight to tomo
+      first="${rest%%[[:space:]]*}"
+      flags+=("$first")
+      rest="$(trim "${rest#"$first"}")"
+    done
     days="" name=""
     if [[ -n "$rest" ]]; then
       first="${rest%%[[:space:]]*}"
@@ -121,6 +130,7 @@ main() {
     before="$(count_cbz)"
     local tomo_args=(-out "$MANGA_LIBRARY")
     [[ -n "$name" ]] && tomo_args+=(-name "$name")
+    tomo_args+=("${flags[@]}")
     if "$TOMO_BIN" "${tomo_args[@]}" "$url"; then
       after="$(count_cbz)"
       new=$((after - before))

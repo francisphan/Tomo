@@ -2,9 +2,13 @@ package cbz
 
 import (
 	"archive/zip"
+	"bytes"
+	"image"
+	"image/png"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"tomo/internal/download"
@@ -27,7 +31,7 @@ func TestWriteStreamsPagesIntoArchive(t *testing.T) {
 	}
 
 	out := filepath.Join(t.TempDir(), "chapter.cbz")
-	if err := Write(out, pages); err != nil {
+	if err := Write(out, pages, false); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
@@ -71,10 +75,102 @@ func TestWriteStreamsPagesIntoArchive(t *testing.T) {
 
 func TestWriteRejectsEmpty(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "x.cbz")
-	if err := Write(out, nil); err == nil {
+	if err := Write(out, nil, false); err == nil {
 		t.Error("expected error for empty page list")
 	}
 	if _, err := os.Stat(out); !os.IsNotExist(err) {
 		t.Error("no file should be created for empty page list")
+	}
+}
+
+func TestWritePadStartPrependsBlankPageSizedLikeFirstPage(t *testing.T) {
+	src := t.TempDir()
+	var img bytes.Buffer
+	if err := png.Encode(&img, image.NewRGBA(image.Rect(0, 0, 30, 45))); err != nil {
+		t.Fatal(err)
+	}
+	pages := []download.Page{
+		{Index: 1, Ext: ".png", Path: tempPage(t, src, "1.png", img.String())},
+		{Index: 2, Ext: ".png", Path: tempPage(t, src, "2.png", img.String())},
+	}
+
+	out := filepath.Join(t.TempDir(), "chapter.cbz")
+	if err := Write(out, pages, true); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	zr, err := zip.OpenReader(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+
+	var names []string
+	for _, f := range zr.File {
+		names = append(names, f.Name)
+	}
+	if want := []string{"0000.png", "0001.png", "0002.png"}; strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("entries = %v, want %v", names, want)
+	}
+	rc, err := zr.File[0].Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rc.Close()
+	blank, err := png.Decode(rc)
+	if err != nil {
+		t.Fatalf("blank page is not a PNG: %v", err)
+	}
+	if b := blank.Bounds(); b.Dx() != 30 || b.Dy() != 45 {
+		t.Errorf("blank page is %dx%d, want 30x45", b.Dx(), b.Dy())
+	}
+	if r, g, bl, _ := blank.At(10, 10).RGBA(); r|g|bl != 0 {
+		t.Errorf("blank page is not black")
+	}
+}
+
+func TestPadPrependsBlankOnceAndKeepsEntries(t *testing.T) {
+	src := t.TempDir()
+	pages := []download.Page{
+		{Index: 1, Ext: ".jpg", Path: tempPage(t, src, "1.jpg", "page-one")},
+		{Index: 2, Ext: ".jpg", Path: tempPage(t, src, "2.jpg", "page-two")},
+	}
+	out := filepath.Join(t.TempDir(), "chapter.cbz")
+	if err := Write(out, pages, false); err != nil {
+		t.Fatal(err)
+	}
+
+	padded, err := Pad(out)
+	if err != nil || !padded {
+		t.Fatalf("Pad = %v, %v; want true, nil", padded, err)
+	}
+	padded, err = Pad(out)
+	if err != nil || padded {
+		t.Fatalf("second Pad = %v, %v; want false, nil", padded, err)
+	}
+
+	zr, err := zip.OpenReader(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+	var names []string
+	for _, f := range zr.File {
+		names = append(names, f.Name)
+	}
+	if want := "0000.png,0001.jpg,0002.jpg"; strings.Join(names, ",") != want {
+		t.Fatalf("entries = %v, want %s", names, want)
+	}
+	rc, err := zr.File[2].Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(b) != "page-two" {
+		t.Errorf("copied entry body = %q, want page-two", b)
+	}
+	entries, _ := os.ReadDir(filepath.Dir(out))
+	if len(entries) != 1 {
+		t.Errorf("leftover files next to the CBZ: %v", entries)
 	}
 }
