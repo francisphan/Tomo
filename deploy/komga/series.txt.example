@@ -1,0 +1,24 @@
+# Series to keep refreshed by refresh-library.sh — one URL per line.
+# Blank lines and anything after a # are ignored. Paste the same series URLs
+# you'd hand to `tomo` directly. Tomo only downloads chapters you don't have yet.
+#
+# After the URL you can list the weekday(s) the series usually updates
+# (mon tue wed thu fri sat sun, comma-separated) — then a daily cron run only
+# checks it on those days. No tag (or "daily") means check every run.
+# FORCE_ALL=1 ./refresh-library.sh ignores the tags when you want a full pass.
+#
+# After the days you can add a series name override (spaces allowed) — it's
+# passed to `tomo -name` so the folder/file naming stays stable when a source
+# titles the series differently from the library folder you already have.
+# A name requires a days field before it (use "daily" if there's no fixed day).
+#
+# Right after the URL you can add tomo flags (anything starting with "-"). Use
+# -pad-start for page-based manga so new chapters get the leading blank page
+# that lines up double-page spreads; leave it off for long-strip manhwa.
+# Flags that take a value need the -flag=value form, e.g. -lang=es.
+
+# https://mangadex.org/title/<id>/<slug>            wed        # weekly, Wednesdays
+# https://asuracomics.com/series/<slug>             tue,sat    # twice a week
+# https://weebcentral.com/series/<id>/<slug>                   # irregular → every run
+# https://weebcentral.com/series/<id>/Dandadan  -pad-start  mon  # manga: pad for spreads
+# https://weebcentral.com/series/<id>/Sousou-no-Frieren  tue  Sousou no Frieren   # keep MangaDex-era folder name

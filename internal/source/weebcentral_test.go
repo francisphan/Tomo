@@ -62,3 +62,29 @@ func TestWCChapterTextKeepsRealTitle(t *testing.T) {
 		t.Errorf("cleanChapterTitle = %q, want the title without the prefix", title)
 	}
 }
+
+func TestWCCustomLabelNumbers(t *testing.T) {
+	// Some series label chapters with a custom prefix instead of "Chapter"
+	// (Spy x Family uses "Mission", Ichi the Witch uses "Hunt"). The number
+	// must still be extracted or every CBZ lands on "Chapter 0000".
+	cases := []struct {
+		label, num string
+	}{
+		{"Mission 12", "12"},
+		{"Mission 112.2", "112.2"},
+		{"Hunt 7", "7"},
+		{"Chapter 208", "208"},    // primary regex still wins
+		{"S2 Chapter 44", "44"},   // prefix noise before "Chapter"
+		{"One Shot", ""},          // no number → unnumbered as before
+		{"Epilogue Part Two", ""}, // words only, no trailing number
+		{"Side Story 3", ""},      // not a chapter number: would collide with ch 3
+		{"Extra 2", ""},
+		{"Season 2", ""},
+		{"Special Chapter 5", "5"}, // explicit "Chapter" still wins
+	}
+	for _, c := range cases {
+		if num := wcNumber(c.label); num != c.num {
+			t.Errorf("label %q: number = %q, want %q", c.label, num, c.num)
+		}
+	}
+}

@@ -16,10 +16,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"math/rand"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -35,6 +37,7 @@ import (
 
 type config struct {
 	out            string
+	name           string
 	chapters       string
 	lang           string
 	concurrency    int
@@ -44,6 +47,7 @@ type config struct {
 	overwrite      bool
 	json           bool
 	noFallback     bool
+	padStart       bool
 }
 
 // version is overridden at build time via -ldflags "-X main.version=...".
@@ -63,8 +67,17 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "pad" {
+		if err := runPad(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	cfg := config{}
 	flag.StringVar(&cfg.out, "out", "./manga", "output directory (a per-series subfolder is created)")
+	flag.StringVar(&cfg.name, "name", "", "series name to use for the folder and file names (default: the source's title; use to keep naming stable across sources)")
 	flag.StringVar(&cfg.chapters, "chapters", "", `chapters to fetch, e.g. "1-20,25,40-" (default: all)`)
 	flag.StringVar(&cfg.lang, "lang", "en", "translated language code (MangaDex only)")
 	flag.IntVar(&cfg.concurrency, "concurrency", 8, "parallel image downloads per chapter")
@@ -74,6 +87,7 @@ func main() {
 	flag.BoolVar(&cfg.overwrite, "overwrite", false, "re-download chapters whose CBZ already exists")
 	flag.BoolVar(&cfg.json, "json", false, "emit machine-readable NDJSON progress (used by the desktop app)")
 	flag.BoolVar(&cfg.noFallback, "no-fallback", false, "don't auto-search other sources when the chosen one has nothing downloadable")
+	flag.BoolVar(&cfg.padStart, "pad-start", false, "add a blank black page at the start of each chapter so double-page spreads line up in two-page reading")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -93,13 +107,54 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "Tomo — download manga/manhwa chapters as CBZ for Tachimanga\n\n")
 	fmt.Fprintf(os.Stderr, "Usage:\n")
 	fmt.Fprintf(os.Stderr, "  tomo [flags] <series-url>      download a series\n")
-	fmt.Fprintf(os.Stderr, "  tomo search [flags] <query>    find a series by title\n\n")
+	fmt.Fprintf(os.Stderr, "  tomo search [flags] <query>    find a series by title\n")
+	fmt.Fprintf(os.Stderr, "  tomo pad <dir|cbz>...          add the -pad-start blank page to CBZs already downloaded\n\n")
 	fmt.Fprintf(os.Stderr, "Download flags:\n")
 	flag.PrintDefaults()
 	fmt.Fprintf(os.Stderr, "\nSupported sites:\n")
 	for _, s := range source.All() {
 		fmt.Fprintf(os.Stderr, "  - %s\n", s.Name())
 	}
+}
+
+// runPad implements `tomo pad`: it gives chapters downloaded without
+// -pad-start the same leading blank page. Directories are searched for CBZs
+// recursively; chapters that already have it are left alone, so it's safe to
+// re-run.
+func runPad(argv []string) error {
+	if len(argv) == 0 {
+		return fmt.Errorf("usage: tomo pad <series-dir|chapter.cbz>...")
+	}
+	var padded, skipped, failed int
+	for _, arg := range argv {
+		err := filepath.WalkDir(arg, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.EqualFold(filepath.Ext(path), ".cbz") {
+				return err
+			}
+			ok, err := cbz.Pad(path)
+			if err != nil {
+				// One unreadable archive shouldn't stop the rest of the library.
+				failed++
+				fmt.Fprintf(os.Stderr, "failed: %s: %v\n", path, err)
+				return nil
+			}
+			if ok {
+				padded++
+				fmt.Println("padded:", path)
+			} else {
+				skipped++
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	fmt.Printf("%d padded, %d already padded, %d failed\n", padded, skipped, failed)
+	if failed > 0 {
+		return fmt.Errorf("%d chapter(s) could not be padded", failed)
+	}
+	return nil
 }
 
 // runSearch implements `tomo search`. It queries every source that supports
@@ -298,18 +353,26 @@ func downloadFrom(ctx context.Context, src source.Source, manga *model.Manga, cf
 		return 0, 0, false, err
 	}
 	chapters := sel.Filter(manga.Chapters)
-	rep.series(manga.Title, len(manga.Chapters), len(chapters))
+	title := cfg.name
+	if title == "" {
+		title = manga.Title
+	}
+	rep.series(title, len(manga.Chapters), len(chapters))
 	if len(chapters) == 0 {
 		return 0, 0, false, fmt.Errorf("no chapters selected")
 	}
 
-	seriesDir := filepath.Join(cfg.out, naming.Sanitize(manga.Title))
+	seriesDir := filepath.Join(cfg.out, naming.Sanitize(title))
 	if err := os.MkdirAll(seriesDir, 0o755); err != nil {
 		return 0, 0, false, err
 	}
 	rep.saving(seriesDir)
 
-	done, failed, interrupted = downloadAll(ctx, src, manga, resolveJobs(seriesDir, manga.Title, chapters), cfg, rep)
+	jobs := resolveJobs(seriesDir, title, chapters)
+	if !cfg.overwrite {
+		markExisting(jobs, existingChapterNumbers(seriesDir))
+	}
+	done, failed, interrupted = downloadAll(ctx, src, manga, jobs, cfg, rep)
 	return done, failed, interrupted, nil
 }
 
@@ -369,9 +432,54 @@ func normalizeTitle(s string) string {
 }
 
 // job pairs a chapter with the unique output path it will be written to.
+// exists marks chapters already on disk under a different file name (see
+// markExisting), which are skipped just like an exact-path match.
 type job struct {
 	chapter model.Chapter
+	series  string // series title used for the file name and ComicInfo
 	path    string
+	exists  bool
+}
+
+// cbzChapterNum extracts the chapter number from any CBZ following the
+// "<Series> - Chapter <number>[ - <title>].cbz" layout, whatever the series
+// prefix or title suffix.
+var cbzChapterNum = regexp.MustCompile(`(?i) - chapter ([0-9]+(?:\.[0-9]+)?)(?: - .*)?\.cbz$`)
+
+// existingChapterNumbers scans seriesDir and returns the padded chapter
+// numbers that already have a CBZ. Earlier runs may have used another source
+// with a different series title or chapter-title suffix in the file names —
+// matching on the chapter number keeps a refresh from re-downloading those
+// chapters as duplicates.
+func existingChapterNumbers(seriesDir string) map[string]bool {
+	entries, err := os.ReadDir(seriesDir)
+	if err != nil {
+		return nil
+	}
+	nums := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if m := cbzChapterNum.FindStringSubmatch(e.Name()); m != nil {
+			nums[naming.PadNumber(m[1], 4)] = true
+		}
+	}
+	return nums
+}
+
+// markExisting flags jobs whose chapter number already has a CBZ on disk.
+// Unnumbered chapters (one-shots, specials) all pad to "0000", so they're left
+// to the exact-path check instead of shadowing each other.
+func markExisting(jobs []job, existing map[string]bool) {
+	for i := range jobs {
+		if jobs[i].chapter.Number == "" {
+			continue
+		}
+		if existing[naming.PadNumber(jobs[i].chapter.Number, 4)] {
+			jobs[i].exists = true
+		}
+	}
 }
 
 // resolveJobs assigns every chapter a unique CBZ path within seriesDir. Two
@@ -389,7 +497,7 @@ func resolveJobs(seriesDir, title string, chapters []model.Chapter) []job {
 			name = fmt.Sprintf("%s (%d).cbz", strings.TrimSuffix(base, ".cbz"), i)
 		}
 		used[strings.ToLower(name)] = true
-		jobs = append(jobs, job{chapter: ch, path: filepath.Join(seriesDir, name)})
+		jobs = append(jobs, job{chapter: ch, series: title, path: filepath.Join(seriesDir, name)})
 	}
 	return jobs
 }
@@ -482,6 +590,9 @@ func doChapter(ctx context.Context, src source.Source, manga *model.Manga, j job
 	}
 
 	if !cfg.overwrite {
+		if j.exists {
+			return result{chapter: ch, skipped: true}
+		}
 		if _, err := os.Stat(j.path); err == nil {
 			return result{chapter: ch, skipped: true}
 		}
@@ -522,7 +633,8 @@ func doChapter(ctx context.Context, src source.Source, manga *model.Manga, j job
 			lastErr = err
 			continue
 		}
-		if err := cbz.Write(j.path, res.Pages); err != nil {
+		info := &cbz.ComicInfo{Series: j.series, Number: ch.Number, Title: ch.Title}
+		if err := cbz.Write(j.path, res.Pages, cfg.padStart, info); err != nil {
 			res.Cleanup()
 			lastErr = fmt.Errorf("write cbz: %w", err)
 			continue
