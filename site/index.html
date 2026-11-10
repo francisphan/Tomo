@@ -117,7 +117,7 @@
       list += `<li id="arc-${i}">
         <div class="range">${a.start}–${a.end ?? ''}<small>${n}</small></div>
         <div><span class="name">${esc(a.name)}</span>${a.end == null ? '<span class="ongoing">ongoing</span>' : ''}
-        <div class="sum">${esc(a.summary)}</div></div></li>`;
+        ${a.summary ? `<div class="sum">${esc(a.summary)}</div>` : ''}</div></li>`;
     }
     list += '</ol>';
 
@@ -166,11 +166,14 @@
     });
     const miss = view.querySelector('#miss');
     const out = ch > last;
-    miss.hidden = !out;
+    const gap = ch > 0 && !out && !s.arcs.some(hit);
+    miss.hidden = !(out || gap);
     if (out) {
       miss.textContent = s.status === 'complete'
         ? `${s.title} ends at chapter ${last}.`
         : `Chapter ${ch} is past this guide (updated to ch. ${last}); it's probably still in the last arc.`;
+    } else if (gap) {
+      miss.textContent = `Chapter ${ch} isn't part of any arc listed here.`;
     }
     const input = view.querySelector('#ch');
     if (!fromInput) input.value = ch || '';
