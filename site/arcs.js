@@ -4,8 +4,8 @@
 // out when the data was last updated (sizes the ongoing arc in the strip). Summaries describe the setup
 // only, so they're safe to skim before a reread.
 //
-// To add a series: append an object to ARCS. `folder` is the series folder
-// name in the Tomo/Komga library; `part` groups arcs under a saga heading.
+// To add a series: append an object to ARCS (set `latest` if it's ongoing);
+// `part` groups arcs under a saga heading.
 window.ARCS = [
   {
     id: 'one-piece',
@@ -53,7 +53,6 @@ window.ARCS = [
     id: 'dandadan',
     latest: 253,
     title: 'Dandadan',
-    folder: 'Dandadan',
     status: 'ongoing',
     source: 'https://dandadan.fandom.com/wiki/Story_Arcs',
     arcs: [
@@ -76,7 +75,6 @@ window.ARCS = [
     id: 'frieren',
     latest: 147,
     title: 'Frieren: Beyond Journey\'s End',
-    folder: 'Sousou no Frieren',
     status: 'ongoing',
     source: 'https://frieren.fandom.com/wiki/Story_Arcs',
     arcs: [
@@ -95,7 +93,6 @@ window.ARCS = [
   {
     id: 'jujutsu-kaisen',
     title: 'Jujutsu Kaisen',
-    folder: 'Jujutsu Kaisen',
     status: 'complete',
     source: 'https://jujutsu-kaisen.fandom.com/wiki/Story_Arcs',
     note: 'Ch. 79 is listed in both Gojo\'s Past and Shibuya Incident on the wiki. Jujutsu Kaisen 0 (the Cursed Child prequel, 4 chapters) is a separate volume.',
@@ -113,7 +110,6 @@ window.ARCS = [
   {
     id: 'haikyuu',
     title: 'Haikyu!!',
-    folder: 'Haikyu!!',
     status: 'complete',
     source: 'https://haikyuu.fandom.com/wiki/Arcs',
     arcs: [
@@ -129,7 +125,6 @@ window.ARCS = [
     id: 'blue-lock',
     latest: 368,
     title: 'Blue Lock',
-    folder: 'Blue Lock',
     status: 'ongoing',
     source: 'https://bluelock.fandom.com/wiki/Story_Arcs',
     arcs: [
@@ -146,7 +141,6 @@ window.ARCS = [
     id: 'kagurabachi',
     latest: 138,
     title: 'Kagurabachi',
-    folder: 'Kagurabachi',
     status: 'ongoing',
     source: 'https://kagurabachi.fandom.com/wiki/Story_Arcs',
     note: 'The official site splits Sword Bearer Assassination into three sections, listed here separately.',

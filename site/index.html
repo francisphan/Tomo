@@ -54,9 +54,10 @@
     background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
   }
   .strip { display: flex; height: 14px; border-radius: 4px; overflow: hidden; margin: 16px 0 6px; gap: 2px; }
-  .strip a { display: block; min-width: 3px; background: var(--seg-a); }
-  .strip a:nth-child(even) { background: var(--seg-b); }
-  .strip a.hit, .strip a:hover { background: var(--accent); }
+  .strip button { display: block; min-width: 3px; padding: 0; border: 0; cursor: pointer; background: var(--seg-a); }
+  .strip button:nth-child(even) { background: var(--seg-b); }
+  .strip button.hit, .strip button:hover, .strip button:focus-visible { background: var(--accent); }
+  .miss { color: var(--accent); font-size: .9rem; margin: 8px 0 0; }
   .scale { display: flex; justify-content: space-between; color: var(--muted); font-size: .8rem; margin-bottom: 20px; }
   .note { color: var(--muted); font-size: .88rem; border-left: 3px solid var(--line); padding-left: 10px; margin: 0 0 20px; }
   h3 { font: 600 .8rem/1 var(--font); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 28px 0 8px; }
@@ -90,19 +91,20 @@
   const view = document.getElementById('view');
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
+  // Ongoing series should set `latest`; without it the guide only knows where the running arc starts.
   const lastChapter = (s) => s.latest ?? Math.max(...s.arcs.map((a) => a.end ?? a.start));
   const span = (a, last) => (a.end ?? last) - a.start + 1;
 
-  function render(id, chapter) {
-    const s = ARCS.find((x) => x.id === id) || ARCS[0];
+  let current = null; // series on screen
+
+  // Build the view for one series. Chapter lookups only toggle classes (highlight()),
+  // so typing in the chapter box never rebuilds the input under the cursor.
+  function render(s) {
+    current = s;
     for (const a of nav.children) a.removeAttribute('aria-current');
     nav.querySelector(`[data-id="${s.id}"]`).setAttribute('aria-current', 'page');
 
     const last = lastChapter(s);
-    const hits = new Set(
-      chapter ? s.arcs.filter((a) => chapter >= a.start && chapter <= (a.end ?? Infinity)).map((a) => a.name) : [],
-    );
-
     let list = '';
     let part;
     for (const [i, a] of s.arcs.entries()) {
@@ -112,7 +114,7 @@
         list += (part ? `<h3>${esc(part)}</h3>` : '') + '<ol>';
       }
       const n = a.end == null ? '' : `${a.end - a.start + 1} ch`;
-      list += `<li id="arc-${i}" class="${hits.has(a.name) ? 'hit' : ''}">
+      list += `<li id="arc-${i}">
         <div class="range">${a.start}–${a.end ?? ''}<small>${n}</small></div>
         <div><span class="name">${esc(a.name)}</span>${a.end == null ? '<span class="ongoing">ongoing</span>' : ''}
         <div class="sum">${esc(a.summary)}</div></div></li>`;
@@ -120,17 +122,18 @@
     list += '</ol>';
 
     const strip = s.arcs
-      .map((a, i) => `<a href="#${s.id}" data-arc="${i}" style="flex:${span(a, last)}" class="${hits.has(a.name) ? 'hit' : ''}"
-        title="${esc(a.name)}: ch. ${a.start}–${a.end ?? 'now'}" aria-label="${esc(a.name)}"></a>`)
+      .map((a, i) => `<button type="button" data-arc="${i}" style="flex:${span(a, last)}"
+        title="${esc(a.name)}: ch. ${a.start}–${a.end ?? 'now'}" aria-label="${esc(a.name)}"></button>`)
       .join('');
 
     view.innerHTML = `
       <div class="head">
         <h2>${esc(s.title)}</h2>
         <label class="jump">Which arc is chapter
-          <input id="ch" type="number" inputmode="numeric" min="1" value="${chapter || ''}" placeholder="e.g. 120"></label>
+          <input id="ch" type="number" inputmode="numeric" min="1" placeholder="e.g. 120"></label>
       </div>
       <div class="meta">${s.arcs.length} arcs · ${s.status === 'complete' ? `complete, ${last} chapters` : `ongoing, ch. ${last} at last update`}</div>
+      <p class="miss" id="miss" hidden></p>
       <div class="strip">${strip}</div>
       <div class="scale"><span>1</span><span>${last}</span></div>
       ${s.note ? `<p class="note">${esc(s.note)}</p>` : ''}
@@ -138,25 +141,56 @@
       <footer>Chapter ranges from the <a href="${esc(s.source)}">series wiki</a>.</footer>`;
 
     const input = view.querySelector('#ch');
-    input.addEventListener('change', () => {
-      const n = Number(input.value) || 0;
-      location.hash = n ? `${s.id}/${n}` : s.id;
+    input.addEventListener('input', () => {
+      const n = Math.floor(Number(input.value));
+      const ch = n >= 1 ? n : 0;
+      history.replaceState(null, '', ch ? `#${s.id}/${ch}` : `#${s.id}`);
+      highlight(ch, true);
     });
-    view.querySelectorAll('.strip a').forEach((el) =>
-      el.addEventListener('click', (e) => {
-        e.preventDefault();
-        document.getElementById(`arc-${el.dataset.arc}`).scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }),
+    view.querySelectorAll('.strip button').forEach((el) =>
+      el.addEventListener('click', () =>
+        document.getElementById(`arc-${el.dataset.arc}`).scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      ),
     );
+  }
+
+  // Mark the arc(s) containing chapter `ch` (0 = clear). An ongoing arc runs to the latest chapter.
+  function highlight(ch, fromInput) {
+    const s = current;
+    const last = lastChapter(s);
+    const hit = (a) => ch >= a.start && ch <= (a.end ?? last);
+    s.arcs.forEach((a, i) => {
+      const on = ch > 0 && hit(a);
+      document.getElementById(`arc-${i}`).classList.toggle('hit', on);
+      view.querySelector(`.strip [data-arc="${i}"]`).classList.toggle('hit', on);
+    });
+    const miss = view.querySelector('#miss');
+    const out = ch > last;
+    miss.hidden = !out;
+    if (out) {
+      miss.textContent = s.status === 'complete'
+        ? `${s.title} ends at chapter ${last}.`
+        : `Chapter ${ch} is past this guide (updated to ch. ${last}); it's probably still in the last arc.`;
+    }
+    const input = view.querySelector('#ch');
+    if (!fromInput) input.value = ch || '';
     const first = view.querySelector('li.hit');
-    if (first) first.scrollIntoView({ block: 'center' });
+    if (first) first.scrollIntoView({ block: fromInput ? 'nearest' : 'center' });
   }
 
   nav.innerHTML = ARCS.map((s) => `<a href="#${s.id}" data-id="${s.id}">${esc(s.title.split(':')[0])}</a>`).join('');
 
   function route() {
     const [id, ch] = location.hash.slice(1).split('/');
-    render(id, Number(ch) || 0);
+    const s = ARCS.find((x) => x.id === id);
+    if (!s) {
+      if (id) history.replaceState(null, '', location.pathname);
+      render(ARCS[0]);
+      return highlight(0);
+    }
+    if (s !== current) render(s);
+    const n = Math.floor(Number(ch));
+    highlight(n >= 1 ? n : 0);
   }
   window.addEventListener('hashchange', route);
   route();
