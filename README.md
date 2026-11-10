@@ -155,6 +155,11 @@ This is exactly the layout Tachimanga's **local library** import expects: one
 folder per series, one archive per chapter, with a zero-padded chapter number
 in each file name so chapters sort and are recognised correctly.
 
+Each CBZ also carries a `ComicInfo.xml` with the series name, chapter number
+and title. Servers like Komga read it, so a chapter is numbered by its real
+chapter number rather than by its position in the folder (which extras and
+decimal chapters like 125.5 would otherwise shift).
+
 To import:
 
 1. Copy the `<Series Title>` folder to your iPad — via **Finder** (plug in,

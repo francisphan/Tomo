@@ -621,7 +621,12 @@ func doChapter(ctx context.Context, src source.Source, manga *model.Manga, j job
 			lastErr = err
 			continue
 		}
-		if err := cbz.Write(j.path, res.Pages, cfg.padStart); err != nil {
+		series := cfg.name
+		if series == "" {
+			series = manga.Title
+		}
+		info := &cbz.ComicInfo{Series: series, Number: ch.Number, Title: ch.Title}
+		if err := cbz.Write(j.path, res.Pages, cfg.padStart, info); err != nil {
 			res.Cleanup()
 			lastErr = fmt.Errorf("write cbz: %w", err)
 			continue

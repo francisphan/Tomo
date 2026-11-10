@@ -8,6 +8,7 @@ package cbz
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/xml"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -33,7 +34,11 @@ import (
 // padStart prepends a blank black page (0000.png) so that, in a two-page
 // reader, the chapter's first page sits alone and later double-page spreads
 // land side by side instead of split across two screens.
-func Write(path string, pages []download.Page, padStart bool) error {
+//
+// info, when non-nil, is stored as ComicInfo.xml so Komga (and readers that
+// import it) number the chapter by its real chapter number rather than by its
+// position in the series folder.
+func Write(path string, pages []download.Page, padStart bool, info *ComicInfo) error {
 	if len(pages) == 0 {
 		return fmt.Errorf("refusing to write empty CBZ: %s", path)
 	}
@@ -91,6 +96,11 @@ func Write(path string, pages []download.Page, padStart bool) error {
 			return fail(err)
 		}
 		src.Close()
+	}
+	if info != nil {
+		if err := writeComicInfo(zw, info); err != nil {
+			return fail(err)
+		}
 	}
 	if err := zw.Close(); err != nil {
 		f.Close()
@@ -225,4 +235,25 @@ func entrySize(f *zip.File) (image.Config, bool) {
 func decodeSize(r io.Reader) (image.Config, bool) {
 	cfg, _, err := image.DecodeConfig(r)
 	return cfg, err == nil && cfg.Width > 0 && cfg.Height > 0
+}
+
+// ComicInfo is the subset of the ComicRack ComicInfo.xml schema Tomo fills in.
+type ComicInfo struct {
+	XMLName xml.Name `xml:"ComicInfo"`
+	Series  string   `xml:"Series,omitempty"`
+	Number  string   `xml:"Number,omitempty"`
+	Title   string   `xml:"Title,omitempty"`
+}
+
+func writeComicInfo(zw *zip.Writer, info *ComicInfo) error {
+	body, err := xml.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return err
+	}
+	w, err := zw.CreateHeader(&zip.FileHeader{Name: "ComicInfo.xml", Method: zip.Deflate, Modified: time.Now()})
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(append([]byte(xml.Header), body...))
+	return err
 }
