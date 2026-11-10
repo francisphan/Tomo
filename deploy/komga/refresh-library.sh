@@ -136,7 +136,7 @@ main() {
     before="$(count_cbz)"
     local tomo_args=(-out "$MANGA_LIBRARY")
     [[ -n "$name" ]] && tomo_args+=(-name "$name")
-    tomo_args+=("${flags[@]}")
+    tomo_args+=(${flags[@]+"${flags[@]}"})  # bash <4.4 + set -u: empty array is "unbound"
     if "$TOMO_BIN" "${tomo_args[@]}" "$url"; then
       after="$(count_cbz)"
       new=$((after - before))
