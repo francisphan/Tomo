@@ -31,6 +31,7 @@ import (
 	"tomo/internal/naming"
 	"tomo/internal/selection"
 	"tomo/internal/source"
+	"tomo/internal/spread"
 )
 
 type config struct {
@@ -44,6 +45,7 @@ type config struct {
 	overwrite      bool
 	json           bool
 	noFallback     bool
+	noSpreadPad    bool
 }
 
 // version is overridden at build time via -ldflags "-X main.version=...".
@@ -74,6 +76,7 @@ func main() {
 	flag.BoolVar(&cfg.overwrite, "overwrite", false, "re-download chapters whose CBZ already exists")
 	flag.BoolVar(&cfg.json, "json", false, "emit machine-readable NDJSON progress (used by the desktop app)")
 	flag.BoolVar(&cfg.noFallback, "no-fallback", false, "don't auto-search other sources when the chosen one has nothing downloadable")
+	flag.BoolVar(&cfg.noSpreadPad, "no-spread-pad", false, "don't insert blank pages to keep two-page spreads together in double-page reading")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -522,7 +525,14 @@ func doChapter(ctx context.Context, src source.Source, manga *model.Manga, j job
 			lastErr = err
 			continue
 		}
-		if err := cbz.Write(j.path, res.Pages); err != nil {
+		pages := res.Pages
+		if !cfg.noSpreadPad {
+			// Best effort: if padding fails, the unpadded chapter is still fine.
+			if padded, err := spread.Pad(pages); err == nil {
+				pages = padded
+			}
+		}
+		if err := cbz.Write(j.path, pages); err != nil {
 			res.Cleanup()
 			lastErr = fmt.Errorf("write cbz: %w", err)
 			continue

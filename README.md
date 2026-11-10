@@ -92,6 +92,7 @@ Run `tomo` with no arguments to see all flags and supported sites.
 | `-retries` | `3` | Retry attempts per failed image |
 | `-list` | `false` | List chapters without downloading |
 | `-overwrite` | `false` | Re-download chapters whose CBZ already exists |
+| `-no-spread-pad` | `false` | Don't insert blank pages to keep two-page spreads together (see below) |
 
 Re-running is safe and resumable: chapters whose CBZ already exists are skipped
 unless `-overwrite` is set. A chapter that fails to download leaves no partial
@@ -154,6 +155,19 @@ To import:
 3. The series appears with all chapters; download/cache them for offline
    reading and you're done.
 
+### Two-page spreads in landscape (double-page) mode
+
+Readers in double-page mode pair pages in order — (1,2), (3,4), … — so a
+spread published as two separate images gets split across two screens when it
+starts on an even-numbered page. Tomo detects spreads by matching the art at
+the inner edges of consecutive pages, and inserts a single blank page just
+before any spread that would otherwise be split. Landscape pages (spreads
+already joined into one image) are shown alone by readers and are accounted
+for. Chapters without spreads are untouched. Disable with `-no-spread-pad`.
+
+Chapters downloaded before this was added aren't changed; re-download them with
+`-overwrite` (optionally limited with `-chapters`) to get the padding.
+
 ## Project layout
 
 ```
@@ -163,6 +177,7 @@ internal/
   source/            Source interface, registry, and per-site adapters
   download/          Concurrent page downloader with retries
   cbz/               Atomic CBZ (zip) writer
+  spread/            Blank-page padding so two-page spreads stay together
   naming/            Filesystem- and Tachimanga-friendly names
   selection/         Chapter range spec parser ("1-10,25,40-")
   httpx/             Shared HTTP client + helpers
