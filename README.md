@@ -154,6 +154,15 @@ To import:
 3. The series appears with all chapters; download/cache them for offline
    reading and you're done.
 
+## Arc guide
+
+`site/` is a small static page listing where each story arc starts and ends
+for series in the library, for picking a reread:
+<https://francisphan.github.io/Tomo/>. Data lives in `site/arcs.js` (chapter
+ranges from each series' wiki); edit it to add a series or extend an ongoing
+arc. Pushing a change under `site/` to `main` redeploys it via
+`.github/workflows/pages.yml`. Open `site/index.html` directly to preview.
+
 ## Project layout
 
 ```
@@ -166,6 +175,7 @@ internal/
   naming/            Filesystem- and Tachimanga-friendly names
   selection/         Chapter range spec parser ("1-10,25,40-")
   httpx/             Shared HTTP client + helpers
+site/                Arc guide (static GitHub Pages site)
 ```
 
 ### Adding a new site

@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arc Guide</title>
+<meta name="description" content="Chapter ranges for the story arcs of the manga in the Tomo library, for quick rereads.">
+<style>
+  :root {
+    --bg: #f6f4ef;
+    --panel: #ffffff;
+    --ink: #1d1b18;
+    --muted: #6b665d;
+    --line: #e2ddd3;
+    --accent: #b4442e;
+    --hit: #fff1c2;
+    --seg-a: #2f5d62;
+    --seg-b: #5e8b7e;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151412;
+      --panel: #1e1c19;
+      --ink: #ece7dd;
+      --muted: #9b958a;
+      --line: #34302a;
+      --accent: #e0775d;
+      --hit: #3d3418;
+      --seg-a: #4f8a8f;
+      --seg-b: #7fae9f;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 var(--font); }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font: 600 1.9rem/1.2 var(--serif); margin: 0 0 4px; }
+  .lede { color: var(--muted); margin: 0 0 20px; }
+  nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
+  nav a {
+    padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px;
+    color: var(--ink); text-decoration: none; background: var(--panel); font-size: .92rem;
+  }
+  nav a[aria-current="page"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; justify-content: space-between; }
+  h2 { font: 600 1.5rem/1.2 var(--serif); margin: 0; }
+  .meta { color: var(--muted); font-size: .9rem; }
+  .jump { display: flex; align-items: center; gap: 8px; font-size: .9rem; color: var(--muted); }
+  .jump input {
+    width: 6.5em; padding: 6px 8px; font: inherit; color: var(--ink);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  }
+  .strip { display: flex; height: 14px; border-radius: 4px; overflow: hidden; margin: 16px 0 6px; gap: 2px; }
+  .strip button { display: block; min-width: 3px; padding: 0; border: 0; cursor: pointer; background: var(--seg-a); }
+  .strip button:nth-child(even) { background: var(--seg-b); }
+  .strip button.hit, .strip button:hover, .strip button:focus-visible { background: var(--accent); }
+  .miss { color: var(--accent); font-size: .9rem; margin: 8px 0 0; }
+  .scale { display: flex; justify-content: space-between; color: var(--muted); font-size: .8rem; margin-bottom: 20px; }
+  .note { color: var(--muted); font-size: .88rem; border-left: 3px solid var(--line); padding-left: 10px; margin: 0 0 20px; }
+  h3 { font: 600 .8rem/1 var(--font); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 28px 0 8px; }
+  ol { list-style: none; margin: 0; padding: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  li { display: grid; grid-template-columns: 9.5em 1fr; gap: 4px 16px; padding: 12px 16px; border-top: 1px solid var(--line); scroll-margin-top: 16px; }
+  li:first-child { border-top: 0; }
+  li.hit { background: var(--hit); }
+  .range { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .range small { display: block; font-weight: 400; color: var(--muted); }
+  .name { font-weight: 600; }
+  .ongoing { color: var(--accent); font-size: .8rem; font-weight: 600; margin-left: 6px; }
+  .sum { color: var(--muted); font-size: .94rem; }
+  footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
+  footer a { color: inherit; }
+  @media (max-width: 520px) {
+    li { grid-template-columns: 1fr; }
+    .range small { display: inline; margin-left: 6px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Arc Guide</h1>
+  <p class="lede">Where each arc starts and ends, for picking a reread. Summaries cover the setup only.</p>
+  <nav id="series"></nav>
+  <section id="view" aria-live="polite"></section>
+</main>
+<script src="arcs.js"></script>
+<script>
+  const nav = document.getElementById('series');
+  const view = document.getElementById('view');
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+  // Ongoing series should set `latest`; without it the guide only knows where the running arc starts.
+  const lastChapter = (s) => s.latest ?? Math.max(...s.arcs.map((a) => a.end ?? a.start));
+  const span = (a, last) => (a.end ?? last) - a.start + 1;
+
+  let current = null; // series on screen
+
+  // Build the view for one series. Chapter lookups only toggle classes (highlight()),
+  // so typing in the chapter box never rebuilds the input under the cursor.
+  function render(s) {
+    current = s;
+    for (const a of nav.children) a.removeAttribute('aria-current');
+    nav.querySelector(`[data-id="${s.id}"]`).setAttribute('aria-current', 'page');
+
+    const last = lastChapter(s);
+    let list = '';
+    let part;
+    for (const [i, a] of s.arcs.entries()) {
+      if (i === 0 || a.part !== part) {
+        if (i > 0) list += '</ol>';
+        part = a.part;
+        list += (part ? `<h3>${esc(part)}</h3>` : '') + '<ol>';
+      }
+      const n = a.end == null ? '' : `${a.end - a.start + 1} ch`;
+      list += `<li id="arc-${i}">
+        <div class="range">${a.start}–${a.end ?? ''}<small>${n}</small></div>
+        <div><span class="name">${esc(a.name)}</span>${a.end == null ? '<span class="ongoing">ongoing</span>' : ''}
+        <div class="sum">${esc(a.summary)}</div></div></li>`;
+    }
+    list += '</ol>';
+
+    const strip = s.arcs
+      .map((a, i) => `<button type="button" data-arc="${i}" style="flex:${span(a, last)}"
+        title="${esc(a.name)}: ch. ${a.start}–${a.end ?? 'now'}" aria-label="${esc(a.name)}"></button>`)
+      .join('');
+
+    view.innerHTML = `
+      <div class="head">
+        <h2>${esc(s.title)}</h2>
+        <label class="jump">Which arc is chapter
+          <input id="ch" type="number" inputmode="numeric" min="1" placeholder="e.g. 120"></label>
+      </div>
+      <div class="meta">${s.arcs.length} arcs · ${s.status === 'complete' ? `complete, ${last} chapters` : `ongoing, ch. ${last} at last update`}</div>
+      <p class="miss" id="miss" hidden></p>
+      <div class="strip">${strip}</div>
+      <div class="scale"><span>1</span><span>${last}</span></div>
+      ${s.note ? `<p class="note">${esc(s.note)}</p>` : ''}
+      ${list}
+      <footer>Chapter ranges from the <a href="${esc(s.source)}">series wiki</a>.</footer>`;
+
+    const input = view.querySelector('#ch');
+    input.addEventListener('input', () => {
+      const n = Math.floor(Number(input.value));
+      const ch = n >= 1 ? n : 0;
+      history.replaceState(null, '', ch ? `#${s.id}/${ch}` : `#${s.id}`);
+      highlight(ch, true);
+    });
+    view.querySelectorAll('.strip button').forEach((el) =>
+      el.addEventListener('click', () =>
+        document.getElementById(`arc-${el.dataset.arc}`).scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      ),
+    );
+  }
+
+  // Mark the arc(s) containing chapter `ch` (0 = clear). An ongoing arc runs to the latest chapter.
+  function highlight(ch, fromInput) {
+    const s = current;
+    const last = lastChapter(s);
+    const hit = (a) => ch >= a.start && ch <= (a.end ?? last);
+    s.arcs.forEach((a, i) => {
+      const on = ch > 0 && hit(a);
+      document.getElementById(`arc-${i}`).classList.toggle('hit', on);
+      view.querySelector(`.strip [data-arc="${i}"]`).classList.toggle('hit', on);
+    });
+    const miss = view.querySelector('#miss');
+    const out = ch > last;
+    miss.hidden = !out;
+    if (out) {
+      miss.textContent = s.status === 'complete'
+        ? `${s.title} ends at chapter ${last}.`
+        : `Chapter ${ch} is past this guide (updated to ch. ${last}); it's probably still in the last arc.`;
+    }
+    const input = view.querySelector('#ch');
+    if (!fromInput) input.value = ch || '';
+    const first = view.querySelector('li.hit');
+    if (first) first.scrollIntoView({ block: fromInput ? 'nearest' : 'center' });
+  }
+
+  nav.innerHTML = ARCS.map((s) => `<a href="#${s.id}" data-id="${s.id}">${esc(s.title.split(':')[0])}</a>`).join('');
+
+  function route() {
+    const [id, ch] = location.hash.slice(1).split('/');
+    const s = ARCS.find((x) => x.id === id);
+    if (!s) {
+      if (id) history.replaceState(null, '', location.pathname);
+      render(ARCS[0]);
+      return highlight(0);
+    }
+    if (s !== current) render(s);
+    const n = Math.floor(Number(ch));
+    highlight(n >= 1 ? n : 0);
+  }
+  window.addEventListener('hashchange', route);
+  route();
+</script>
+</body>
+</html>
