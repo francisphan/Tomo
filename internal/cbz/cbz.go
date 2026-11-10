@@ -171,6 +171,16 @@ func Pad(path string) (bool, error) {
 		os.Remove(tmp)
 		return false, err
 	}
+	// CreateTemp makes the file 0600; keep the original's mode so a library
+	// served by another user (Komga) can still read it.
+	if fi, err := os.Stat(path); err == nil {
+		if err := os.Chmod(tmp, fi.Mode().Perm()); err != nil {
+			os.Remove(tmp)
+			return false, err
+		}
+	}
+	// Windows can't rename over a file that still has an open handle.
+	zr.Close()
 	if err := os.Rename(tmp, path); err != nil {
 		os.Remove(tmp)
 		return false, err

@@ -206,3 +206,33 @@ func TestWriteStoresComicInfo(t *testing.T) {
 		t.Errorf("got %+v, want %+v", got, *info)
 	}
 }
+
+func TestPadKeepsFileModeAndComicInfo(t *testing.T) {
+	src := t.TempDir()
+	pages := []download.Page{{Index: 1, Ext: ".jpg", Path: tempPage(t, src, "1.jpg", "p")}}
+	out := filepath.Join(t.TempDir(), "chapter.cbz")
+	if err := Write(out, pages, false, &ComicInfo{Series: "S", Number: "7"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(out, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := Pad(out); err != nil || !ok {
+		t.Fatalf("Pad = %v, %v", ok, err)
+	}
+	fi, err := os.Stat(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o644 {
+		t.Errorf("mode after Pad = %v, want 0644", fi.Mode().Perm())
+	}
+	zr, err := zip.OpenReader(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+	if last := zr.File[len(zr.File)-1].Name; last != "ComicInfo.xml" {
+		t.Errorf("last entry after Pad = %q, want ComicInfo.xml", last)
+	}
+}

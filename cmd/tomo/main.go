@@ -125,7 +125,7 @@ func runPad(argv []string) error {
 	if len(argv) == 0 {
 		return fmt.Errorf("usage: tomo pad <series-dir|chapter.cbz>...")
 	}
-	var padded, skipped int
+	var padded, skipped, failed int
 	for _, arg := range argv {
 		err := filepath.WalkDir(arg, func(path string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() || !strings.EqualFold(filepath.Ext(path), ".cbz") {
@@ -133,7 +133,10 @@ func runPad(argv []string) error {
 			}
 			ok, err := cbz.Pad(path)
 			if err != nil {
-				return fmt.Errorf("%s: %w", path, err)
+				// One unreadable archive shouldn't stop the rest of the library.
+				failed++
+				fmt.Fprintf(os.Stderr, "failed: %s: %v\n", path, err)
+				return nil
 			}
 			if ok {
 				padded++
@@ -147,7 +150,10 @@ func runPad(argv []string) error {
 			return err
 		}
 	}
-	fmt.Printf("%d padded, %d already padded\n", padded, skipped)
+	fmt.Printf("%d padded, %d already padded, %d failed\n", padded, skipped, failed)
+	if failed > 0 {
+		return fmt.Errorf("%d chapter(s) could not be padded", failed)
+	}
 	return nil
 }
 
@@ -430,6 +436,7 @@ func normalizeTitle(s string) string {
 // markExisting), which are skipped just like an exact-path match.
 type job struct {
 	chapter model.Chapter
+	series  string // series title used for the file name and ComicInfo
 	path    string
 	exists  bool
 }
@@ -462,8 +469,13 @@ func existingChapterNumbers(seriesDir string) map[string]bool {
 }
 
 // markExisting flags jobs whose chapter number already has a CBZ on disk.
+// Unnumbered chapters (one-shots, specials) all pad to "0000", so they're left
+// to the exact-path check instead of shadowing each other.
 func markExisting(jobs []job, existing map[string]bool) {
 	for i := range jobs {
+		if jobs[i].chapter.Number == "" {
+			continue
+		}
 		if existing[naming.PadNumber(jobs[i].chapter.Number, 4)] {
 			jobs[i].exists = true
 		}
@@ -485,7 +497,7 @@ func resolveJobs(seriesDir, title string, chapters []model.Chapter) []job {
 			name = fmt.Sprintf("%s (%d).cbz", strings.TrimSuffix(base, ".cbz"), i)
 		}
 		used[strings.ToLower(name)] = true
-		jobs = append(jobs, job{chapter: ch, path: filepath.Join(seriesDir, name)})
+		jobs = append(jobs, job{chapter: ch, series: title, path: filepath.Join(seriesDir, name)})
 	}
 	return jobs
 }
@@ -621,11 +633,7 @@ func doChapter(ctx context.Context, src source.Source, manga *model.Manga, j job
 			lastErr = err
 			continue
 		}
-		series := cfg.name
-		if series == "" {
-			series = manga.Title
-		}
-		info := &cbz.ComicInfo{Series: series, Number: ch.Number, Title: ch.Title}
+		info := &cbz.ComicInfo{Series: j.series, Number: ch.Number, Title: ch.Title}
 		if err := cbz.Write(j.path, res.Pages, cfg.padStart, info); err != nil {
 			res.Cleanup()
 			lastErr = fmt.Errorf("write cbz: %w", err)

@@ -8,7 +8,8 @@
 #
 # Each series.txt line is:  URL [-flags...] [days [name...]]
 #   flags extra tomo flags for this series, e.g. -pad-start for page-based
-#         manga read two pages at a time.
+#         manga read two pages at a time. Flags that take a value must use
+#         the -flag=value form (-lang=es), since each flag is one token.
 #   days  weekday(s) the series updates (mon..sun, comma-separated, or
 #         "daily"). Run this daily from cron and a series tagged "tue" is only
 #         checked on Tuesdays; untagged (or "daily") series are checked every
@@ -105,6 +106,11 @@ main() {
     flags=()
     while [[ "$rest" == -* ]]; do   # leading -flags go straight to tomo
       first="${rest%%[[:space:]]*}"
+      case "$first" in
+        -out|-name|-chapters|-lang|-source|-concurrency|-chapter-workers|-retries)
+          log "WARNING: $url: $first needs a value; write it as $first=VALUE"
+          ;;
+      esac
       flags+=("$first")
       rest="$(trim "${rest#"$first"}")"
     done

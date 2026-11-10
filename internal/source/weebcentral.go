@@ -43,7 +43,26 @@ var (
 	// "<words> <number>", so real titles that merely contain digits
 	// somewhere don't get misparsed.
 	wcLabelNum = regexp.MustCompile(`(?i)^[a-z][a-z .'&-]*\s(\d+(?:\.\d+)?)$`)
+	// wcNotChapter marks labels whose number isn't a chapter number
+	// ("Side Story 3", "Extra 2", "Season 2"); they stay unnumbered rather
+	// than colliding with the real chapter of the same number.
+	wcNotChapter = regexp.MustCompile(`(?i)^(side|extra|special|bonus|omake|season|volume|vol|part|epilogue|prologue|afterword|oneshot|one shot)\b`)
 )
+
+// wcNumber extracts the chapter number from a Weeb Central chapter label, or
+// "" when it has none.
+func wcNumber(label string) string {
+	if mt := wcChapNum.FindStringSubmatch(label); len(mt) == 2 {
+		return mt[1]
+	}
+	if wcNotChapter.MatchString(label) {
+		return ""
+	}
+	if mt := wcLabelNum.FindStringSubmatch(label); len(mt) == 2 {
+		return mt[1]
+	}
+	return ""
+}
 
 const wcBase = "https://weebcentral.com"
 
@@ -139,12 +158,7 @@ func (w *WeebCentral) Series(ctx context.Context, seriesURL string) (*model.Mang
 		seen[cm[1]] = true
 
 		text := wcChapterText(s)
-		num := ""
-		if mt := wcChapNum.FindStringSubmatch(text); len(mt) == 2 {
-			num = mt[1]
-		} else if mt := wcLabelNum.FindStringSubmatch(text); len(mt) == 2 {
-			num = mt[1]
-		}
+		num := wcNumber(text)
 		manga.Chapters = append(manga.Chapters, model.Chapter{
 			Number: num,
 			Title:  cleanChapterTitle(text, num),

@@ -15,6 +15,7 @@
 # Right after the URL you can add tomo flags (anything starting with "-"). Use
 # -pad-start for page-based manga so new chapters get the leading blank page
 # that lines up double-page spreads; leave it off for long-strip manhwa.
+# Flags that take a value need the -flag=value form, e.g. -lang=es.
 
 # https://mangadex.org/title/<id>/<slug>            wed        # weekly, Wednesdays
 # https://asuracomics.com/series/<slug>             tue,sat    # twice a week

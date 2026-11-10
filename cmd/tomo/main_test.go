@@ -89,9 +89,10 @@ func TestMarkExisting(t *testing.T) {
 		{chapter: model.Chapter{Number: "2.1"}},  // exists as "0002.1"
 		{chapter: model.Chapter{Number: "2"}},    // new
 		{chapter: model.Chapter{Number: "10.5"}}, // new
+		{chapter: model.Chapter{Number: ""}},     // unnumbered: exact path only
 	}
-	markExisting(jobs, map[string]bool{"0001": true, "0002.1": true})
-	want := []bool{true, true, false, false}
+	markExisting(jobs, map[string]bool{"0001": true, "0002.1": true, "0000": true})
+	want := []bool{true, true, false, false, false}
 	for i, j := range jobs {
 		if j.exists != want[i] {
 			t.Errorf("job %d (ch %s): exists = %v, want %v", i, j.chapter.Number, j.exists, want[i])

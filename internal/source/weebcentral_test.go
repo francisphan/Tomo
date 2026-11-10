@@ -77,15 +77,13 @@ func TestWCCustomLabelNumbers(t *testing.T) {
 		{"S2 Chapter 44", "44"},   // prefix noise before "Chapter"
 		{"One Shot", ""},          // no number → unnumbered as before
 		{"Epilogue Part Two", ""}, // words only, no trailing number
+		{"Side Story 3", ""},      // not a chapter number: would collide with ch 3
+		{"Extra 2", ""},
+		{"Season 2", ""},
+		{"Special Chapter 5", "5"}, // explicit "Chapter" still wins
 	}
 	for _, c := range cases {
-		num := ""
-		if mt := wcChapNum.FindStringSubmatch(c.label); len(mt) == 2 {
-			num = mt[1]
-		} else if mt := wcLabelNum.FindStringSubmatch(c.label); len(mt) == 2 {
-			num = mt[1]
-		}
-		if num != c.num {
+		if num := wcNumber(c.label); num != c.num {
 			t.Errorf("label %q: number = %q, want %q", c.label, num, c.num)
 		}
 	}
