@@ -117,7 +117,7 @@
       list += `<li id="arc-${i}">
         <div class="range">${a.start}–${a.end ?? ''}<small>${n}</small></div>
         <div><span class="name">${esc(a.name)}</span>${a.end == null ? '<span class="ongoing">ongoing</span>' : ''}
-        <div class="sum">${esc(a.summary)}</div></div></li>`;
+        ${a.summary ? `<div class="sum">${esc(a.summary)}</div>` : ''}</div></li>`;
     }
     list += '</ol>';
 
@@ -159,18 +159,23 @@
     const s = current;
     const last = lastChapter(s);
     const hit = (a) => ch >= a.start && ch <= (a.end ?? last);
+    let any = false;
     s.arcs.forEach((a, i) => {
       const on = ch > 0 && hit(a);
+      any ||= on;
       document.getElementById(`arc-${i}`).classList.toggle('hit', on);
       view.querySelector(`.strip [data-arc="${i}"]`).classList.toggle('hit', on);
     });
     const miss = view.querySelector('#miss');
     const out = ch > last;
-    miss.hidden = !out;
+    const gap = ch > 0 && !out && !any;
+    miss.hidden = !(out || gap);
     if (out) {
       miss.textContent = s.status === 'complete'
         ? `${s.title} ends at chapter ${last}.`
         : `Chapter ${ch} is past this guide (updated to ch. ${last}); it's probably still in the last arc.`;
+    } else if (gap) {
+      miss.textContent = `Chapter ${ch} sits between arcs; the wiki doesn't assign it to one.`;
     }
     const input = view.querySelector('#ch');
     if (!fromInput) input.value = ch || '';
