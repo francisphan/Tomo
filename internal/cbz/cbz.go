@@ -111,6 +111,13 @@ func Write(path string, pages []download.Page, padStart bool, info *ComicInfo) e
 		os.Remove(tmp)
 		return err
 	}
+	// CreateTemp makes the file 0600; a library is usually read by another
+	// user (Komga, a file share), so publish it world-readable like any
+	// normally created file.
+	if err := os.Chmod(tmp, 0o644); err != nil {
+		os.Remove(tmp)
+		return err
+	}
 	if err := os.Rename(tmp, path); err != nil {
 		os.Remove(tmp)
 		return err

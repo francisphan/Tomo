@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -234,5 +235,24 @@ func TestPadKeepsFileModeAndComicInfo(t *testing.T) {
 	defer zr.Close()
 	if last := zr.File[len(zr.File)-1].Name; last != "ComicInfo.xml" {
 		t.Errorf("last entry after Pad = %q, want ComicInfo.xml", last)
+	}
+}
+
+func TestWriteMakesArchiveReadable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits")
+	}
+	src := t.TempDir()
+	pages := []download.Page{{Index: 1, Ext: ".jpg", Path: tempPage(t, src, "1.jpg", "p")}}
+	out := filepath.Join(t.TempDir(), "chapter.cbz")
+	if err := Write(out, pages, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o644 {
+		t.Errorf("mode = %v, want 0644", fi.Mode().Perm())
 	}
 }
