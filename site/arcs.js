@@ -1,11 +1,13 @@
 // Arc guide data. Chapter ranges come from each series' Fandom wiki
 // (Story Arcs page + the per-arc "<Arc> chapters" categories), checked
-// 2026-11-10. `end: null` = arc still running; `latest` = newest chapter
+// 2026-11-10; Haikyu!! matches from each match's wiki article, trimmed to the
+// chapters from first serve to final point (checked 2026-11-12). `end: null` = arc still running; `latest` = newest chapter
 // out when the data was last updated (sizes the ongoing arc in the strip). Summaries describe the setup
 // only, so they're safe to skim before a reread.
 //
 // To add a series: append an object to ARCS (set `latest` if it's ongoing);
-// `part` groups arcs under a saga heading.
+// `part` groups arcs under a saga heading; `matches` ({ name, start, end })
+// lists the games inside an arc, for sports series.
 window.ARCS = [
   {
     id: 'one-piece',
@@ -113,12 +115,60 @@ window.ARCS = [
     status: 'complete',
     source: 'https://haikyuu.fandom.com/wiki/Arcs',
     arcs: [
-      { name: 'Karasuno Team Formation', start: 1, end: 35, summary: 'Hinata and Kageyama, rivals from middle school, both join Karasuno.' },
-      { name: 'Interhigh', start: 36, end: 71, summary: 'Tokonami, the Date Tech Iron Wall, then Aoba Johsai.' },
-      { name: 'Tokyo Expedition', start: 72, end: 96, summary: 'Summer training camp with Fukurodani, Nekoma and the Tokyo schools.' },
-      { name: 'Spring High Preliminary', start: 97, end: 206, summary: 'The Miyagi qualifiers, ending against Aoba Johsai and Shiratorizawa.' },
-      { name: 'Tokyo Nationals', start: 207, end: 369, summary: 'Youth camp, then Nationals: Inarizaki, Nekoma, Kamomedai.' },
-      { name: 'Final', start: 370, end: 402, summary: 'Years later: Hinata in Brazil, then the V.League.' },
+      { name: 'Karasuno Team Formation', start: 1, end: 35, summary: 'Hinata and Kageyama, rivals from middle school, both join Karasuno.',
+        matches: [
+          { name: 'Yukigaoka vs Kitagawa Daiichi', start: 1, end: 1 },
+          { name: '3-on-3: Hinata, Kageyama & Tanaka vs Tsukishima, Yamaguchi & Sawamura', start: 5, end: 9 },
+          { name: 'Karasuno vs Aoba Johsai (practice match)', start: 11, end: 14 },
+          { name: 'Karasuno vs Neighborhood Association', start: 19, end: 24 },
+          { name: 'Karasuno vs Nekoma (practice match)', start: 27, end: 33 },
+        ],
+      },
+      { name: 'Interhigh', start: 36, end: 71, summary: 'Tokonami, the Date Tech Iron Wall, then Aoba Johsai.',
+        matches: [
+          { name: 'Karasuno vs Tokonami', start: 39, end: 40 },
+          { name: 'Karasuno vs Date Tech', start: 42, end: 47 },
+          { name: 'Karasuno vs Aoba Johsai', start: 49, end: 68 },
+        ],
+      },
+      { name: 'Tokyo Expedition', start: 72, end: 96, summary: 'Summer training camp with Fukurodani, Nekoma and the Tokyo schools.',
+        matches: [
+          { name: 'Karasuno vs Ogi Nishi (practice match)', start: 75, end: 75 },
+          { name: 'Karasuno vs Shinzen (camp game)', start: 79, end: 79 },
+          { name: 'Karasuno vs Fukurodani (final camp match)', start: 92, end: 95 },
+        ],
+      },
+      { name: 'Spring High Preliminary', start: 97, end: 206, summary: 'The Miyagi qualifiers, ending against Aoba Johsai and Shiratorizawa.',
+        matches: [
+          { name: 'Karasuno vs Ohgiminami', start: 99, end: 101 },
+          { name: 'Karasuno vs Kakugawa', start: 102, end: 104 },
+          { name: 'Karasuno vs Johzenji', start: 109, end: 114 },
+          { name: 'Karasuno vs Wakutani Minami', start: 116, end: 125 },
+          { name: 'Aoba Johsai vs Date Tech', start: 126, end: 128 },
+          { name: 'Karasuno vs Aoba Johsai', start: 129, end: 147 },
+          { name: 'Karasuno vs Shiratorizawa (final)', start: 151, end: 188 },
+          { name: 'Fukurodani vs Nekoma (Tokyo qualifier)', start: 191, end: 195 },
+          { name: 'Nekoma vs Nohebi (Tokyo qualifier)', start: 196, end: 205 },
+        ],
+      },
+      { name: 'Tokyo Nationals', start: 207, end: 369, summary: 'Youth camp, then Nationals: Inarizaki, Nekoma, Kamomedai.',
+        matches: [
+          { name: 'Karasuno vs Date Tech (practice match)', start: 221, end: 227 },
+          { name: 'Karasuno vs Tsubakihara', start: 233, end: 242 },
+          { name: 'Karasuno vs Inarizaki', start: 249, end: 264 },
+          { name: 'Nekoma vs Sarukawa Tech', start: 265, end: 268 },
+          { name: 'Karasuno vs Inarizaki (continued)', start: 269, end: 290 },
+          { name: 'Karasuno vs Nekoma', start: 294, end: 324 },
+          { name: 'Fukurodani vs Mujinazaka', start: 328, end: 337 },
+          { name: 'Karasuno vs Kamomedai', start: 339, end: 367 },
+        ],
+      },
+      { name: 'Final', start: 370, end: 402, summary: 'Years later: Hinata in Brazil, then the V.League.',
+        matches: [
+          { name: 'MSBY Black Jackals vs Schweiden Adlers', start: 380, end: 401 },
+          { name: 'Japan vs Argentina (Tokyo Olympics)', start: 402, end: 402 },
+        ],
+      },
     ],
   },
   {

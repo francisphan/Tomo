@@ -70,6 +70,10 @@
   .name { font-weight: 600; }
   .ongoing { color: var(--accent); font-size: .8rem; font-weight: 600; margin-left: 6px; }
   .sum { color: var(--muted); font-size: .94rem; }
+  .matches { list-style: none; margin: 8px 0 0; padding: 0; font-size: .92rem; }
+  .matches li { grid-template-columns: 5.5em 1fr; gap: 0 12px; padding: 3px 8px; border-top: 0; border-left: 3px solid transparent; }
+  .matches li.hit { background: transparent; border-left-color: var(--accent); font-weight: 600; }
+  .matches .range { font-weight: 400; color: var(--muted); }
   footer { margin-top: 32px; color: var(--muted); font-size: .85rem; }
   footer a { color: inherit; }
   @media (max-width: 520px) {
@@ -117,7 +121,10 @@
       list += `<li id="arc-${i}">
         <div class="range">${a.start}–${a.end ?? ''}<small>${n}</small></div>
         <div><span class="name">${esc(a.name)}</span>${a.end == null ? '<span class="ongoing">ongoing</span>' : ''}
-        ${a.summary ? `<div class="sum">${esc(a.summary)}</div>` : ''}</div></li>`;
+        ${a.summary ? `<div class="sum">${esc(a.summary)}</div>` : ''}
+        ${a.matches ? `<ul class="matches" aria-label="Matches">${a.matches
+          .map((m, j) => `<li id="arc-${i}-m${j}"><span class="range">${m.start === m.end ? m.start : `${m.start}–${m.end}`}</span><span>${esc(m.name)}</span></li>`)
+          .join('')}</ul>` : ''}</div></li>`;
     }
     list += '</ol>';
 
@@ -165,6 +172,9 @@
       any ||= on;
       document.getElementById(`arc-${i}`).classList.toggle('hit', on);
       view.querySelector(`.strip [data-arc="${i}"]`).classList.toggle('hit', on);
+      a.matches?.forEach((m, j) => {
+        document.getElementById(`arc-${i}-m${j}`).classList.toggle('hit', on && ch >= m.start && ch <= m.end);
+      });
     });
     const miss = view.querySelector('#miss');
     const out = ch > last;
