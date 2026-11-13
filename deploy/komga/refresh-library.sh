@@ -2,8 +2,16 @@
 # refresh-library.sh — fetch new chapters for a list of ongoing series into the
 # Komga library. Built to run unattended from cron.
 #
-# Tomo only writes chapters whose CBZ doesn't already exist, so every pass is
-# cheap and idempotent — it just appends whatever is new, then Komga picks the
+# New chapters are downloaded into a holding folder (STAGING_DIR), not the
+# library. Each one is looked over with `tomo check` (pages open, no repeated
+# content page, not far shorter than the series usually is); chapters that pass
+# move into the library, and chapters that don't stay in the holding folder and
+# are logged as HELD with the reason. Held chapters are re-checked every run and
+# never re-downloaded. To accept one anyway, move it into the library yourself;
+# to fetch it again, delete it.
+#
+# Tomo only downloads chapters that aren't already in the library or the
+# holding folder, so every pass is cheap and idempotent, then Komga picks the
 # files up on its next scan.
 #
 # Each series.txt line is:  URL [-flags...] [days [name...]]
@@ -25,7 +33,10 @@
 #   FORCE_ALL=1 ./refresh-library.sh         # ignore day tags, check everything
 #
 # Config (environment variables, or a .env file in this folder):
-#   MANGA_LIBRARY   output dir Komga serves from (required; same as `tomo -out`)
+#   MANGA_LIBRARY   library dir Komga serves from (required)
+#   STAGING_DIR     holding folder for new chapters until they pass the check
+#                   (default: ~/.local/state/tomo/staging; keep it outside the
+#                   library so Komga never shows unchecked chapters)
 #   TOMO_BIN        path to the tomo binary            (default: tomo on PATH)
 #   SERIES_FILE     series URLs + optional update days (default: ./series.txt)
 #   LOG_FILE        append run output here             (default: stdout)
@@ -48,6 +59,7 @@ fi
 TOMO_BIN="${TOMO_BIN:-tomo}"
 SERIES_FILE="${SERIES_FILE:-$script_dir/series.txt}"
 MANGA_LIBRARY="${MANGA_LIBRARY:-}"
+STAGING_DIR="${STAGING_DIR:-$HOME/.local/state/tomo/staging}"
 FORCE_ALL="${FORCE_ALL:-0}"
 
 log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
@@ -78,7 +90,32 @@ valid_days() {
   [[ "$1" =~ ^(daily|(mon|tue|wed|thu|fri|sat|sun)(,(mon|tue|wed|thu|fri|sat|sun))*)$ ]]
 }
 
-count_cbz() { find "$MANGA_LIBRARY" -name '*.cbz' 2>/dev/null | wc -l; }
+count_cbz() { find "$STAGING_DIR" -name '*.cbz' 2>/dev/null | wc -l; }
+
+# Check every chapter in the holding folder; move the ones that pass into the
+# library. Sets moved and held.
+release_checked() {
+  local f series dest out
+  moved=0 held=0
+  while IFS= read -r -d '' f; do
+    series="$(basename "$(dirname "$f")")"
+    dest="$MANGA_LIBRARY/$series/$(basename "$f")"
+    if [[ -e "$dest" ]]; then
+      log "HELD: $series/$(basename "$f"): a chapter with this name is already in the library"
+      held=$((held + 1))
+      continue
+    fi
+    if out="$("$TOMO_BIN" check -library "$MANGA_LIBRARY" "$f" 2>/dev/null)"; then
+      mkdir -p "$MANGA_LIBRARY/$series"
+      mv -n -- "$f" "$dest"
+      moved=$((moved + 1))
+    else
+      log "HELD: $series/$(basename "$f"): ${out#held: "$f": }"
+      held=$((held + 1))
+    fi
+  done < <(find "$STAGING_DIR" -name '*.cbz' -print0 2>/dev/null | sort -z)
+  find "$STAGING_DIR" -mindepth 1 -type d -empty -delete 2>/dev/null || true
+}
 
 main() {
   if [[ -z "$MANGA_LIBRARY" ]]; then
@@ -134,19 +171,23 @@ main() {
     checked=$((checked + 1))
     log "checking: $url"
     before="$(count_cbz)"
-    local tomo_args=(-out "$MANGA_LIBRARY")
+    local tomo_args=(-out "$STAGING_DIR" -library "$MANGA_LIBRARY")
     [[ -n "$name" ]] && tomo_args+=(-name "$name")
     tomo_args+=(${flags[@]+"${flags[@]}"})  # bash <4.4 + set -u: empty array is "unbound"
     if "$TOMO_BIN" "${tomo_args[@]}" "$url"; then
       after="$(count_cbz)"
       new=$((after - before))
       new_total=$((new_total + new))
-      log "ok: $url ($new new)"
+      log "ok: $url ($new downloaded)"
     else
       log "FAILED: $url"
       failures=$((failures + 1))
     fi
   done < "$SERIES_FILE"
+
+  local moved held
+  release_checked
+  log "check: $moved chapter(s) moved into the library, $held held in $STAGING_DIR"
 
   # Write the arc guide into new chapters (titles, reading lists, series
   # description). It also picks up guide edits, and only rewrites chapters
@@ -157,7 +198,7 @@ main() {
     log "WARNING: tomo arcs failed; chapters keep their previous arc info"
   fi
 
-  log "finished: $checked checked, $skipped skipped (not their day), $failures failed, $new_total new chapters"
+  log "finished: $checked checked, $skipped skipped (not their day), $failures failed, $new_total downloaded, $moved added, $held held"
   [[ "$failures" -eq 0 ]]
 }
 
