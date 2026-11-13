@@ -127,7 +127,9 @@ Scans rarely use true black: the ink usually sits around level 30 of 255, which
 an OLED screen (iPad Pro, iPhone) shows as a faint grey glow. `tomo black
 ~/Manga/<Series>` rewrites each chapter in place:
 
-- Pages become greyscale, which also removes faint colour noise in dark areas.
+- Black-and-white pages become greyscale, which also removes faint colour
+  noise in dark areas. Colour pages (more than 10% of the page in clear
+  colour, such as colour openers and covers) are kept exactly as they are.
 - Anything at level 40 or darker becomes pure black, and the darker greys up
   to level 112 are stretched down to meet it. Lighter greys, screentone and
   paper are left as they were.

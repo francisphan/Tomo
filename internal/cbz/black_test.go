@@ -226,3 +226,71 @@ func TestJPEGQualityMatchesEncoder(t *testing.T) {
 		t.Errorf("unreadable JPEG = %d, want the 85 fallback", got)
 	}
 }
+
+// colourPage is an RGB JPEG that is mostly saturated red and blue.
+func colourPage(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 64, 32))
+	for y := 0; y < 32; y++ {
+		for x := 0; x < 64; x++ {
+			c := color.RGBA{200, 30, 40, 255}
+			if x >= 32 {
+				c = color.RGBA{30, 60, 200, 255}
+			}
+			img.Set(x, y, c)
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestTrueBlackKeepsColourPagesAsTheyAre(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.cbz")
+	colour := colourPage(t)
+	writeZip(t, path, map[string][]byte{
+		"0001.jpg": colour,
+		"0002.jpg": scanPage(t),
+	}, []string{"0001.jpg", "0002.jpg"})
+	if ok, err := TrueBlack(path); err != nil || !ok {
+		t.Fatalf("TrueBlack = %v, %v", ok, err)
+	}
+	_, data := readZip(t, path)
+	if !bytes.Equal(data["0001.jpg"], colour) {
+		t.Error("colour page was changed")
+	}
+	bw, err := jpeg.Decode(bytes.NewReader(data["0002.jpg"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := bw.(*image.Gray); !ok {
+		t.Errorf("black-and-white page decodes as %T, want greyscale", bw)
+	}
+}
+
+func TestIsColour(t *testing.T) {
+	colour, _ := jpeg.Decode(bytes.NewReader(colourPage(t)))
+	grey, _ := jpeg.Decode(bytes.NewReader(scanPage(t)))
+	if !isColour(colour) {
+		t.Error("saturated page not detected as colour")
+	}
+	if isColour(grey) {
+		t.Error("black-and-white RGB scan detected as colour")
+	}
+	// A grey page with a small coloured logo (under 10% of the page) converts.
+	logo := image.NewRGBA(image.Rect(0, 0, 100, 100))
+	for y := 0; y < 100; y++ {
+		for x := 0; x < 100; x++ {
+			c := color.RGBA{128, 128, 128, 255}
+			if x < 20 && y < 20 {
+				c = color.RGBA{220, 20, 20, 255}
+			}
+			logo.Set(x, y, c)
+		}
+	}
+	if isColour(logo) {
+		t.Error("grey page with a small logo detected as colour")
+	}
+}

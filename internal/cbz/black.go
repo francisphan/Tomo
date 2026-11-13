@@ -48,11 +48,12 @@ var trueBlackLUT = func() (lut [256]uint8) {
 	return lut
 }()
 
-// TrueBlack rewrites an existing CBZ so every page is greyscale with true
-// blacks, for reading on an OLED screen. JPEG pages stay JPEG, including JPEGs
-// a source stored under a .png name; every other format is stored as PNG. It
-// reports false and leaves the file alone if the
-// chapter was already converted. Non-image entries are copied as-is, and the
+// TrueBlack rewrites an existing CBZ so every black-and-white page is
+// greyscale with true blacks, for reading on an OLED screen. Colour pages
+// (see isColour) are kept exactly as they are. JPEG pages stay JPEG, including
+// JPEGs a source stored under a .png name; every other format is stored as
+// PNG. It reports false and leaves the file alone if the chapter was already
+// converted. Non-image entries are copied as-is, and the
 // rewrite goes through a temp file so a failure never damages the original.
 func TrueBlack(path string) (bool, error) {
 	zr, err := zip.OpenReader(path)
@@ -158,6 +159,9 @@ func convertPage(f *zip.File) (string, []byte, error) {
 	if err != nil {
 		return "", nil, err
 	}
+	if isColour(img) {
+		return f.Name, src, nil
+	}
 	gray := toTrueBlack(img)
 	var buf bytes.Buffer
 	name := f.Name
@@ -171,6 +175,49 @@ func convertPage(f *zip.File) (string, []byte, error) {
 		err = png.Encode(&buf, gray)
 	}
 	return name, buf.Bytes(), err
+}
+
+const (
+	// A pixel counts as coloured when its chroma (|Cb-128| + |Cr-128|) is
+	// above colourChroma: well clear of JPEG noise and slightly tinted paper.
+	colourChroma = 24
+	// A page counts as a colour page when more than colourShare of its pixels
+	// are coloured, so a grey page with a small coloured logo still converts.
+	colourShare = 0.10
+)
+
+// isColour reports whether img is a colour page that TrueBlack should leave
+// alone. It samples every other pixel in each direction, which is plenty to
+// tell a colour page from a black-and-white one.
+func isColour(img image.Image) bool {
+	b := img.Bounds()
+	coloured, total := 0, 0
+	count := func(cb, cr uint8) {
+		total++
+		if abs(int(cb)-128)+abs(int(cr)-128) > colourChroma {
+			coloured++
+		}
+	}
+	switch src := img.(type) {
+	case *image.Gray, *image.Gray16:
+		return false
+	case *image.YCbCr:
+		for y := b.Min.Y; y < b.Max.Y; y += 2 {
+			for x := b.Min.X; x < b.Max.X; x += 2 {
+				i := src.COffset(x, y)
+				count(src.Cb[i], src.Cr[i])
+			}
+		}
+	default:
+		for y := b.Min.Y; y < b.Max.Y; y += 2 {
+			for x := b.Min.X; x < b.Max.X; x += 2 {
+				r, g, bl, _ := img.At(x, y).RGBA()
+				_, cb, cr := color.RGBToYCbCr(uint8(r>>8), uint8(g>>8), uint8(bl>>8))
+				count(cb, cr)
+			}
+		}
+	}
+	return total > 0 && float64(coloured) > colourShare*float64(total)
 }
 
 // stdLuminance is the JPEG standard's luminance quantization table, which
