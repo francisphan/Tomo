@@ -141,13 +141,13 @@ func TestPadPrependsBlankOnceAndKeepsEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	padded, err := Pad(out)
-	if err != nil || !padded {
-		t.Fatalf("Pad = %v, %v; want true, nil", padded, err)
+	res, err := Pad(out)
+	if err != nil || res != PadAdded {
+		t.Fatalf("Pad = %v, %v; want PadAdded, nil", res, err)
 	}
-	padded, err = Pad(out)
-	if err != nil || padded {
-		t.Fatalf("second Pad = %v, %v; want false, nil", padded, err)
+	res, err = Pad(out)
+	if err != nil || res != PadUnchanged {
+		t.Fatalf("second Pad = %v, %v; want PadUnchanged, nil", res, err)
 	}
 
 	zr, err := zip.OpenReader(out)
@@ -218,8 +218,8 @@ func TestPadKeepsFileModeAndComicInfo(t *testing.T) {
 	if err := os.Chmod(out, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := Pad(out); err != nil || !ok {
-		t.Fatalf("Pad = %v, %v", ok, err)
+	if res, err := Pad(out); err != nil || res != PadAdded {
+		t.Fatalf("Pad = %v, %v", res, err)
 	}
 	fi, err := os.Stat(out)
 	if err != nil {

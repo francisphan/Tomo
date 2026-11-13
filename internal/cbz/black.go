@@ -125,7 +125,7 @@ func TrueBlack(path string) (bool, error) {
 		if err != nil {
 			return err
 		}
-		_, err = w.Write(markComicInfo(info))
+		_, err = w.Write(markComicInfo(info, TrueBlackMark))
 		return err
 	})
 }
@@ -292,16 +292,16 @@ func toTrueBlack(img image.Image) *image.Gray {
 	return out
 }
 
-// markComicInfo adds TrueBlackMark to ComicInfo.xml's Notes, editing the text
-// in place so any fields Tomo doesn't know about survive.
-func markComicInfo(x []byte) []byte {
+// markComicInfo adds mark to ComicInfo.xml's Notes, editing the text in place
+// so any fields Tomo doesn't know about survive.
+func markComicInfo(x []byte, mark string) []byte {
 	if i := bytes.Index(x, []byte("</Notes>")); i >= 0 {
-		return insertAt(x, i, "; "+TrueBlackMark)
+		return insertAt(x, i, "; "+mark)
 	}
 	if i := bytes.LastIndex(x, []byte("</ComicInfo>")); i >= 0 {
-		return insertAt(x, i, "  <Notes>"+TrueBlackMark+"</Notes>\n")
+		return insertAt(x, i, "  <Notes>"+mark+"</Notes>\n")
 	}
-	return []byte(xml.Header + "<ComicInfo>\n  <Notes>" + TrueBlackMark + "</Notes>\n</ComicInfo>")
+	return []byte(xml.Header + "<ComicInfo>\n  <Notes>" + mark + "</Notes>\n</ComicInfo>")
 }
 
 func insertAt(x []byte, i int, s string) []byte {

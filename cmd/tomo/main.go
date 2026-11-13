@@ -75,6 +75,14 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "unpad" {
+		if err := runUnpad(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "black" {
 		if err := runBlack(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
@@ -116,7 +124,8 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "Usage:\n")
 	fmt.Fprintf(os.Stderr, "  tomo [flags] <series-url>      download a series\n")
 	fmt.Fprintf(os.Stderr, "  tomo search [flags] <query>    find a series by title\n")
-	fmt.Fprintf(os.Stderr, "  tomo pad <dir|cbz>...          add the -pad-start blank page to CBZs already downloaded\n")
+	fmt.Fprintf(os.Stderr, "  tomo pad <dir|cbz>...          add (or repair) the -pad-start blank page in CBZs already downloaded\n")
+	fmt.Fprintf(os.Stderr, "  tomo unpad <cbz>...            remove the blank page where split spreads pair up without it\n")
 	fmt.Fprintf(os.Stderr, "  tomo black <dir|cbz>...        make pages greyscale with true blacks, for OLED screens\n\n")
 	fmt.Fprintf(os.Stderr, "Download flags:\n")
 	flag.PrintDefaults()
@@ -127,31 +136,44 @@ func usage() {
 }
 
 // runPad implements `tomo pad`: it gives chapters downloaded without
-// -pad-start the same leading blank page. Directories are searched for CBZs
-// recursively; chapters that already have it are left alone, so it's safe to
+// -pad-start the same leading blank page, and repairs chapters an older Tomo
+// padded wrongly (see cbz.Pad). Directories are searched for CBZs
+// recursively; chapters that are already right are left alone, so it's safe to
 // re-run.
 func runPad(argv []string) error {
+	return eachChapter(argv, "pad", cbz.Pad)
+}
+
+// runUnpad implements `tomo unpad`: it takes the blank page out of chapters
+// whose split spreads pair up without it, and marks them so `tomo pad` leaves
+// them unpadded.
+func runUnpad(argv []string) error {
+	return eachChapter(argv, "unpad", cbz.Unpad)
+}
+
+// eachChapter runs fix on every CBZ under argv and prints what changed.
+func eachChapter(argv []string, verb string, fix func(string) (cbz.PadResult, error)) error {
 	if len(argv) == 0 {
-		return fmt.Errorf("usage: tomo pad <series-dir|chapter.cbz>...")
+		return fmt.Errorf("usage: tomo %s <series-dir|chapter.cbz>...", verb)
 	}
-	var padded, skipped, failed int
+	labels := map[cbz.PadResult]string{cbz.PadAdded: "padded", cbz.PadResized: "resized blank page", cbz.PadRemoved: "removed blank page"}
+	counts := map[cbz.PadResult]int{}
+	failed := 0
 	for _, arg := range argv {
 		err := filepath.WalkDir(arg, func(path string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() || !strings.EqualFold(filepath.Ext(path), ".cbz") {
 				return err
 			}
-			ok, err := cbz.Pad(path)
+			res, err := fix(path)
 			if err != nil {
 				// One unreadable archive shouldn't stop the rest of the library.
 				failed++
 				fmt.Fprintf(os.Stderr, "failed: %s: %v\n", path, err)
 				return nil
 			}
-			if ok {
-				padded++
-				fmt.Println("padded:", path)
-			} else {
-				skipped++
+			counts[res]++
+			if l, ok := labels[res]; ok {
+				fmt.Printf("%s: %s\n", l, path)
 			}
 			return nil
 		})
@@ -159,9 +181,10 @@ func runPad(argv []string) error {
 			return err
 		}
 	}
-	fmt.Printf("%d padded, %d already padded, %d failed\n", padded, skipped, failed)
+	fmt.Printf("%d padded, %d resized, %d unpadded, %d unchanged, %d failed\n",
+		counts[cbz.PadAdded], counts[cbz.PadResized], counts[cbz.PadRemoved], counts[cbz.PadUnchanged], failed)
 	if failed > 0 {
-		return fmt.Errorf("%d chapter(s) could not be padded", failed)
+		return fmt.Errorf("%d chapter(s) could not be processed", failed)
 	}
 	return nil
 }
