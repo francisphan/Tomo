@@ -48,6 +48,8 @@ type config struct {
 	json           bool
 	noFallback     bool
 	padStart       bool
+	trueBlack      bool
+	library        string
 }
 
 // version is overridden at build time via -ldflags "-X main.version=...".
@@ -83,6 +85,14 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "check" {
+		if err := runCheck(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "arcs" {
 		if err := runArcs(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
@@ -112,6 +122,8 @@ func main() {
 	flag.BoolVar(&cfg.json, "json", false, "emit machine-readable NDJSON progress (used by the desktop app)")
 	flag.BoolVar(&cfg.noFallback, "no-fallback", false, "don't auto-search other sources when the chosen one has nothing downloadable")
 	flag.BoolVar(&cfg.padStart, "pad-start", false, "add a blank black page at the start of each chapter so double-page spreads line up in two-page reading")
+	flag.BoolVar(&cfg.trueBlack, "true-black", false, "convert black-and-white pages to greyscale with true blacks (see `tomo black`); colour pages are kept")
+	flag.StringVar(&cfg.library, "library", "", "library dir to check for chapters you already have, when -out is a holding folder (skips chapters in <library>/<series>)")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -135,7 +147,8 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  tomo pad <dir|cbz>...          add (or repair) the -pad-start blank page in CBZs already downloaded\n")
 	fmt.Fprintf(os.Stderr, "  tomo unpad <cbz>...            remove the blank page where split spreads pair up without it\n")
 	fmt.Fprintf(os.Stderr, "  tomo black <dir|cbz>...        make pages greyscale with true blacks, for OLED screens\n")
-	fmt.Fprintf(os.Stderr, "  tomo arcs <series-dir>...      write the arc guide into chapter titles, reading lists and the description\n\n")
+	fmt.Fprintf(os.Stderr, "  tomo arcs <series-dir>...      write the arc guide into chapter titles, reading lists and the description\n")
+	fmt.Fprintf(os.Stderr, "  tomo check [-library dir] <cbz>...  look a downloaded chapter over before it goes into the library\n\n")
 	fmt.Fprintf(os.Stderr, "Download flags:\n")
 	flag.PrintDefaults()
 	fmt.Fprintf(os.Stderr, "\nSupported sites:\n")
@@ -451,7 +464,16 @@ func downloadFrom(ctx context.Context, src source.Source, manga *model.Manga, cf
 
 	jobs := resolveJobs(seriesDir, title, chapters)
 	if !cfg.overwrite {
-		markExisting(jobs, existingChapterNumbers(seriesDir))
+		existing := existingChapterNumbers(seriesDir)
+		if existing == nil {
+			existing = map[string]bool{}
+		}
+		if cfg.library != "" {
+			for n := range existingChapterNumbers(filepath.Join(cfg.library, naming.Sanitize(title))) {
+				existing[n] = true
+			}
+		}
+		markExisting(jobs, existing)
 	}
 	done, failed, interrupted = downloadAll(ctx, src, manga, jobs, cfg, rep)
 	return done, failed, interrupted, nil
@@ -721,6 +743,13 @@ func doChapter(ctx context.Context, src source.Source, manga *model.Manga, j job
 			continue
 		}
 		res.Cleanup()
+		if cfg.trueBlack {
+			if _, err := cbz.TrueBlack(j.path); err != nil {
+				os.Remove(j.path) // don't leave a half-processed chapter behind
+				lastErr = fmt.Errorf("true black: %w", err)
+				continue
+			}
+		}
 		return result{chapter: ch}
 	}
 	return result{chapter: ch, err: lastErr}

@@ -42,6 +42,7 @@ tomo pad <dir|cbz>...          # add (or repair) the -pad-start blank page in ch
 tomo unpad <cbz>...            # remove it where split spreads pair up without it
 tomo black <dir|cbz>...        # make pages greyscale with true blacks, for OLED screens
 tomo arcs <series-dir>...      # write the arc guide into chapter titles, reading lists and the description
+tomo check [-library dir] <cbz>... # look a downloaded chapter over before it goes into the library
 ```
 
 ### Search
@@ -97,6 +98,8 @@ Run `tomo` with no arguments to see all flags and supported sites.
 | `-list` | `false` | List chapters without downloading |
 | `-overwrite` | `false` | Re-download chapters whose CBZ already exists |
 | `-pad-start` | `false` | Add a blank black page at the start of each chapter, so double-page spreads line up when reading two pages at a time (e.g. iPad landscape) |
+| `-true-black` | `false` | Convert black-and-white pages to greyscale with true blacks as each chapter is written (see [True blacks](#true-blacks-for-oled-screens)); colour pages are kept |
+| `-library` | | With `-out` as a holding folder: also skip chapters already in `<library>/<series>` |
 
 Re-running is safe and resumable: chapters whose CBZ already exists are skipped
 unless `-overwrite` is set. A chapter that fails to download leaves no partial
@@ -121,6 +124,16 @@ are already right are left alone.
 Some chapters have spreads split across two files that only pair up *without*
 the blank page. Run `tomo unpad` on those chapters. They're marked in
 `ComicInfo.xml`, so a later `tomo pad` leaves them unpadded.
+
+### Checking chapters before they reach the library
+
+`tomo check -library ~/Manga <chapter.cbz>` prints `ok:` or `held:` with the
+reason, and exits non-zero when a chapter is held. A chapter is held when a
+page won't open, when a page with real content appears twice (repeated blank
+or logo pages are normal), or when it has fewer than half the pages the series
+usually has (spreads count as two; extras numbered like 12.5 are exempt). The
+nightly refresh in `deploy/komga` downloads into a holding folder and only
+moves chapters that pass.
 
 ### True blacks for OLED screens
 
