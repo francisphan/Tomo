@@ -279,18 +279,54 @@ func TestIsColour(t *testing.T) {
 	if isColour(grey) {
 		t.Error("black-and-white RGB scan detected as colour")
 	}
-	// A grey page with a small coloured logo (under 10% of the page) converts.
+	// A grey page with a tiny coloured mark (1% of the page) converts.
 	logo := image.NewRGBA(image.Rect(0, 0, 100, 100))
 	for y := 0; y < 100; y++ {
 		for x := 0; x < 100; x++ {
 			c := color.RGBA{128, 128, 128, 255}
-			if x < 20 && y < 20 {
+			if x < 10 && y < 10 {
 				c = color.RGBA{220, 20, 20, 255}
 			}
 			logo.Set(x, y, c)
 		}
 	}
 	if isColour(logo) {
-		t.Error("grey page with a small logo detected as colour")
+		t.Error("grey page with a tiny coloured mark detected as colour")
+	}
+	// A spot-colour title (5% of the page) keeps the page as it is.
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 50; x++ {
+			logo.Set(x, y+40, color.RGBA{220, 20, 20, 255})
+		}
+	}
+	if !isColour(logo) {
+		t.Error("page with a spot-colour title not detected as colour")
+	}
+}
+
+func TestTrueBlackSavesWebPAsJPEG(t *testing.T) {
+	scan, err := os.ReadFile("testdata/scan.webp") // ink at level 32, white paper
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "c.cbz")
+	writeZip(t, path, map[string][]byte{"0001.webp": scan}, []string{"0001.webp"})
+	if ok, err := TrueBlack(path); err != nil || !ok {
+		t.Fatalf("TrueBlack = %v, %v", ok, err)
+	}
+	names, data := readZip(t, path)
+	if strings.Join(names, ",") != "0001.jpg,ComicInfo.xml" {
+		t.Fatalf("entries = %v, want the WebP page renamed to .jpg", names)
+	}
+	img, err := jpeg.Decode(bytes.NewReader(data["0001.jpg"]))
+	if err != nil {
+		t.Fatalf("page is not a JPEG: %v", err)
+	}
+	g, ok := img.(*image.Gray)
+	if !ok {
+		t.Fatalf("page decodes as %T, want greyscale", img)
+	}
+	if ink := g.GrayAt(8, 16).Y; ink > 3 {
+		t.Errorf("ink became %d, want true black", ink)
 	}
 }

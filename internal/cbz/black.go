@@ -51,8 +51,8 @@ var trueBlackLUT = func() (lut [256]uint8) {
 // TrueBlack rewrites an existing CBZ so every black-and-white page is
 // greyscale with true blacks, for reading on an OLED screen. Colour pages
 // (see isColour) are kept exactly as they are. JPEG pages stay JPEG, including
-// JPEGs a source stored under a .png name; every other format is stored as
-// PNG. It reports false and leaves the file alone if the chapter was already
+// JPEGs a source stored under a .png name; WebP pages become JPEG; every
+// other format is stored as PNG. It reports false and leaves the file alone if the chapter was already
 // converted. Non-image entries are copied as-is, and the
 // rewrite goes through a temp file so a failure never damages the original.
 func TrueBlack(path string) (bool, error) {
@@ -166,9 +166,15 @@ func convertPage(f *zip.File) (string, []byte, error) {
 	var buf bytes.Buffer
 	name := f.Name
 	// Follow the data, not the name: re-saving a JPEG scan as PNG doubles it.
-	if format == "jpeg" {
+	switch format {
+	case "jpeg":
 		err = jpeg.Encode(&buf, gray, &jpeg.Options{Quality: jpegQuality(src)})
-	} else {
+	case "webp":
+		// Go can't write WebP, and a lossy WebP scan re-saved as PNG grows
+		// about 2.5x; JPEG at 88 stays close to the original size.
+		name = strings.TrimSuffix(name, filepath.Ext(name)) + ".jpg"
+		err = jpeg.Encode(&buf, gray, &jpeg.Options{Quality: 88})
+	default:
 		if ext := filepath.Ext(name); !strings.EqualFold(ext, ".png") {
 			name = strings.TrimSuffix(name, ext) + ".png"
 		}
@@ -182,8 +188,10 @@ const (
 	// above colourChroma: well clear of JPEG noise and slightly tinted paper.
 	colourChroma = 24
 	// A page counts as a colour page when more than colourShare of its pixels
-	// are coloured, so a grey page with a small coloured logo still converts.
-	colourShare = 0.10
+	// are coloured. 2% keeps spot-colour pages (a coloured chapter title on an
+	// otherwise black-and-white page) while a page with a tiny coloured mark
+	// still converts.
+	colourShare = 0.02
 )
 
 // isColour reports whether img is a colour page that TrueBlack should leave
