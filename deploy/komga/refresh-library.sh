@@ -148,6 +148,15 @@ main() {
     fi
   done < "$SERIES_FILE"
 
+  # Write the arc guide into new chapters (titles, reading lists, series
+  # description). It also picks up guide edits, and only rewrites chapters
+  # whose arc info changed, so running it every time is cheap. A failure here
+  # (say, the guide can't be fetched) is logged but doesn't fail the run.
+  log "arcs: writing the arc guide into the library"
+  if ! "$TOMO_BIN" arcs "$MANGA_LIBRARY"/*/; then
+    log "WARNING: tomo arcs failed; chapters keep their previous arc info"
+  fi
+
   log "finished: $checked checked, $skipped skipped (not their day), $failures failed, $new_total new chapters"
   [[ "$failures" -eq 0 ]]
 }
