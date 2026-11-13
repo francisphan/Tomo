@@ -83,6 +83,14 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "arcs" {
+		if err := runArcs(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "black" {
 		if err := runBlack(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
@@ -126,7 +134,8 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  tomo search [flags] <query>    find a series by title\n")
 	fmt.Fprintf(os.Stderr, "  tomo pad <dir|cbz>...          add (or repair) the -pad-start blank page in CBZs already downloaded\n")
 	fmt.Fprintf(os.Stderr, "  tomo unpad <cbz>...            remove the blank page where split spreads pair up without it\n")
-	fmt.Fprintf(os.Stderr, "  tomo black <dir|cbz>...        make pages greyscale with true blacks, for OLED screens\n\n")
+	fmt.Fprintf(os.Stderr, "  tomo black <dir|cbz>...        make pages greyscale with true blacks, for OLED screens\n")
+	fmt.Fprintf(os.Stderr, "  tomo arcs <series-dir>...      write the arc guide into chapter titles, reading lists and the description\n\n")
 	fmt.Fprintf(os.Stderr, "Download flags:\n")
 	flag.PrintDefaults()
 	fmt.Fprintf(os.Stderr, "\nSupported sites:\n")
