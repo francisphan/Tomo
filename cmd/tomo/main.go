@@ -75,6 +75,14 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "black" {
+		if err := runBlack(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	cfg := config{}
 	flag.StringVar(&cfg.out, "out", "./manga", "output directory (a per-series subfolder is created)")
 	flag.StringVar(&cfg.name, "name", "", "series name to use for the folder and file names (default: the source's title; use to keep naming stable across sources)")
@@ -108,7 +116,8 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "Usage:\n")
 	fmt.Fprintf(os.Stderr, "  tomo [flags] <series-url>      download a series\n")
 	fmt.Fprintf(os.Stderr, "  tomo search [flags] <query>    find a series by title\n")
-	fmt.Fprintf(os.Stderr, "  tomo pad <dir|cbz>...          add the -pad-start blank page to CBZs already downloaded\n\n")
+	fmt.Fprintf(os.Stderr, "  tomo pad <dir|cbz>...          add the -pad-start blank page to CBZs already downloaded\n")
+	fmt.Fprintf(os.Stderr, "  tomo black <dir|cbz>...        make pages greyscale with true blacks, for OLED screens\n\n")
 	fmt.Fprintf(os.Stderr, "Download flags:\n")
 	flag.PrintDefaults()
 	fmt.Fprintf(os.Stderr, "\nSupported sites:\n")
@@ -153,6 +162,46 @@ func runPad(argv []string) error {
 	fmt.Printf("%d padded, %d already padded, %d failed\n", padded, skipped, failed)
 	if failed > 0 {
 		return fmt.Errorf("%d chapter(s) could not be padded", failed)
+	}
+	return nil
+}
+
+// runBlack implements `tomo black`: it converts downloaded chapters to
+// greyscale with true blacks (see cbz.TrueBlack). Directories are searched for
+// CBZs recursively; converted chapters are marked and skipped, so it's safe to
+// re-run.
+func runBlack(argv []string) error {
+	if len(argv) == 0 {
+		return fmt.Errorf("usage: tomo black <series-dir|chapter.cbz>...")
+	}
+	var converted, skipped, failed int
+	for _, arg := range argv {
+		err := filepath.WalkDir(arg, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.EqualFold(filepath.Ext(path), ".cbz") {
+				return err
+			}
+			ok, err := cbz.TrueBlack(path)
+			if err != nil {
+				// One unreadable archive shouldn't stop the rest of the library.
+				failed++
+				fmt.Fprintf(os.Stderr, "failed: %s: %v\n", path, err)
+				return nil
+			}
+			if ok {
+				converted++
+				fmt.Println("converted:", path)
+			} else {
+				skipped++
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	fmt.Printf("%d converted, %d already converted, %d failed\n", converted, skipped, failed)
+	if failed > 0 {
+		return fmt.Errorf("%d chapter(s) could not be converted", failed)
 	}
 	return nil
 }

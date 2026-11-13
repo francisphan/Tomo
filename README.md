@@ -39,6 +39,7 @@ bash scripts/build-cli.sh v1.0.0       # or cross-compile all OS targets into di
 tomo [flags] <series-url>      # download a series
 tomo search [flags] <query>    # find a series by title
 tomo pad <dir|cbz>...          # add the -pad-start blank page to chapters already downloaded
+tomo black <dir|cbz>...        # make pages greyscale with true blacks, for OLED screens
 ```
 
 ### Search
@@ -107,6 +108,23 @@ split across two screens. `-pad-start` puts a blank black page in front so the
 spreads pair up. Use it for page-based manga, not long-strip manhwa. To pad
 chapters you already have, run `tomo pad ~/Manga/<Series>`; chapters that
 already have the blank page are skipped.
+
+### True blacks for OLED screens
+
+Scans rarely use true black: the ink usually sits around level 30 of 255, which
+an OLED screen (iPad Pro, iPhone) shows as a faint grey glow. `tomo black
+~/Manga/<Series>` rewrites each chapter in place:
+
+- Pages become greyscale, which also removes faint colour noise in dark areas.
+- Anything at level 40 or darker becomes pure black, and the darker greys up
+  to level 112 are stretched down to meet it. Lighter greys, screentone and
+  paper are left as they were.
+- JPEG pages are re-saved at the quality they came with, so chapters stay
+  about the same size. Other formats are stored as PNG.
+
+Converted chapters are marked in their `ComicInfo.xml` and skipped on a re-run,
+so a chapter is never darkened twice. The originals are replaced, so keep a
+copy (or re-download) if you might want them back.
 
 ## Supported sites
 
