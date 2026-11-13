@@ -41,6 +41,7 @@ tomo search [flags] <query>    # find a series by title
 tomo pad <dir|cbz>...          # add (or repair) the -pad-start blank page in chapters already downloaded
 tomo unpad <cbz>...            # remove it where split spreads pair up without it
 tomo black <dir|cbz>...        # make pages greyscale with true blacks, for OLED screens
+tomo arcs <series-dir>...      # write the arc guide into chapter titles, reading lists and the description
 ```
 
 ### Search
@@ -208,10 +209,38 @@ To import:
 
 `site/` is a small static page listing where each story arc starts and ends
 for series in the library, for picking a reread:
-<https://francisphan.github.io/Tomo/>. Data lives in `site/arcs.js` (chapter
-ranges from each series' wiki); edit it to add a series or extend an ongoing
-arc. Pushing a change under `site/` to `main` redeploys it via
-`.github/workflows/pages.yml`. Open `site/index.html` directly to preview.
+<https://francisphan.github.io/Tomo/>. Pushing a change under `site/` to
+`main` redeploys it via `.github/workflows/pages.yml`. To preview, serve the
+folder (`python3 -m http.server -d site`) and open it; the page fetches its
+data, so opening the file directly won't work.
+
+The data is `site/arcs.json`, shared by the site and `tomo arcs`:
+
+- Chapter ranges come from each series' Fandom wiki (its Story Arcs page and
+  per-arc chapter categories). Haikyu!! matches come from each match's wiki
+  article, trimmed to the chapters from first serve to final point.
+- `end: null` marks an arc that's still running; `latest` is the newest
+  chapter out when the data was last updated (it sizes the running arc).
+- `part` groups arcs under a saga heading, `matches` (`name`, `start`, `end`)
+  lists the games inside an arc for sports series, and `folder` names the
+  library folder when it differs from `title`.
+- Summaries describe the setup only, so they're safe to skim before a reread.
+
+### In the reader: `tomo arcs`
+
+`tomo arcs ~/Manga/<Series>` writes the guide into the series itself, so
+Komga (and Tachimanga through it) shows it without the site open:
+
+- Each chapter's title becomes `<arc> · <match> · <source title>`, using the
+  parts it has (for example `Interhigh · Karasuno vs Aoba Johsai`).
+- Each chapter's `StoryArc` is set to `<Series> · <arc>`, which Komga turns
+  into one reading list per arc.
+- `series.json` gets the whole guide as the series description.
+
+Folders the guide doesn't cover are skipped, and only chapters whose info
+changes are rewritten, so it's safe to run over the whole library. It reads
+the published guide by default; pass `-data site/arcs.json` to use a local
+copy.
 
 ## Project layout
 
