@@ -128,13 +128,15 @@ an OLED screen (iPad Pro, iPhone) shows as a faint grey glow. `tomo black
 ~/Manga/<Series>` rewrites each chapter in place:
 
 - Black-and-white pages become greyscale, which also removes faint colour
-  noise in dark areas. Colour pages (more than 10% of the page in clear
-  colour, such as colour openers and covers) are kept exactly as they are.
+  noise in dark areas. Colour pages (more than 2% of the page in clear
+  colour: colour openers, covers, and pages with a spot-colour title) are
+  kept exactly as they are.
 - Anything at level 40 or darker becomes pure black, and the darker greys up
   to level 112 are stretched down to meet it. Lighter greys, screentone and
   paper are left as they were.
 - JPEG pages are re-saved at the quality they came with, so chapters stay
-  about the same size. Other formats are stored as PNG.
+  about the same size. WebP pages become JPEG (quality 88); other formats are
+  stored as PNG.
 
 Converted chapters are marked in their `ComicInfo.xml` and skipped on a re-run,
 so a chapter is never darkened twice. The originals are replaced, so keep a
