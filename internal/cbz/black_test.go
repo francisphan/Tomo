@@ -205,7 +205,7 @@ func TestTrueBlackLeavesArchiveOnBadPage(t *testing.T) {
 }
 
 func TestMarkComicInfoAppendsToExistingNotes(t *testing.T) {
-	got := string(markComicInfo([]byte("<ComicInfo><Notes>scanned by X</Notes></ComicInfo>")))
+	got := string(markComicInfo([]byte("<ComicInfo><Notes>scanned by X</Notes></ComicInfo>"), TrueBlackMark))
 	if got != "<ComicInfo><Notes>scanned by X; "+TrueBlackMark+"</Notes></ComicInfo>" {
 		t.Errorf("got %q", got)
 	}

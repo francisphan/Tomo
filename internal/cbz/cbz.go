@@ -33,7 +33,8 @@ import (
 //
 // padStart prepends a blank black page (0000.png) so that, in a two-page
 // reader, the chapter's first page sits alone and later double-page spreads
-// land side by side instead of split across two screens.
+// land side by side instead of split across two screens. A chapter that opens
+// with a spread gets no blank page: the spread shows on its own anyway.
 //
 // info, when non-nil, is stored as ComicInfo.xml so Komga (and readers that
 // import it) number the chapter by its real chapter number rather than by its
@@ -62,7 +63,7 @@ func Write(path string, pages []download.Page, padStart bool, info *ComicInfo) e
 		os.Remove(tmp)
 		return err
 	}
-	if padStart {
+	if padStart && !startsWithSpread(pages) {
 		var sizes []image.Config
 		for _, p := range pages {
 			if cfg, ok := fileSize(p.Path); ok {
@@ -125,74 +126,206 @@ func Write(path string, pages []download.Page, padStart bool, info *ComicInfo) e
 	return nil
 }
 
-// Pad rewrites an existing CBZ with a blank page (0000.png) in front, the same
-// page Write adds with padStart. It reports false and leaves the file alone if
-// the archive already starts with a 0000 page. Other entries are copied as-is,
-// and the rewrite goes through a temp file so a failure never damages the
-// original.
-func Pad(path string) (bool, error) {
+// PadResult says what Pad or Unpad did to a chapter.
+type PadResult int
+
+const (
+	PadUnchanged PadResult = iota // already right, or left alone on purpose
+	PadAdded                      // blank page added in front
+	PadResized                    // a spread-sized blank page redrawn page-sized
+	PadRemoved                    // blank page taken out
+)
+
+// NoPadMark in ComicInfo.xml's Notes means the chapter should have no blank
+// page. Unpad sets it for chapters whose split spreads pair up without one,
+// so a later Pad doesn't put the page back.
+const NoPadMark = "tomo:no-pad"
+
+// Pad makes an existing CBZ's leading blank page (0000.png, the page Write
+// adds with padStart) right for two-page reading, and reports what it did:
+//
+//   - adds one when the chapter has none;
+//   - removes it when the chapter opens with a spread (a wide page shows on its
+//     own anyway, so the blank page would just sit alone on screen) or is
+//     marked NoPadMark;
+//   - redraws it page-sized when an older Tomo made it spread-sized.
+//
+// A 0000 page that isn't all black is a real page and is never touched. Other
+// entries are copied as-is, and the rewrite goes through a temp file so a
+// failure never damages the original.
+func Pad(path string) (PadResult, error) {
 	zr, err := zip.OpenReader(path)
 	if err != nil {
-		return false, err
+		return PadUnchanged, err
 	}
 	defer zr.Close()
 
-	var sizes []image.Config
-	for _, f := range zr.File {
-		if strings.HasPrefix(f.Name, "0000.") {
-			return false, nil
-		}
-		if cfg, ok := entrySize(f); ok {
-			sizes = append(sizes, cfg)
-		}
-	}
-	blank, err := blankPage(sizes)
+	c, err := scanChapter(zr)
 	if err != nil {
-		return false, err
+		return PadUnchanged, err
 	}
+	want := !c.opensWithSpread && !bytes.Contains(c.info, []byte(NoPadMark))
 
-	out, err := os.CreateTemp(filepath.Dir(path), ".tomo-*.part")
+	switch {
+	case c.blank != nil && !want:
+		return PadRemoved, rewrite(path, zr, func(zw *zip.Writer) error {
+			return copyExcept(zw, zr, c.blank)
+		})
+	case c.blank != nil && c.blankSize.Width > c.blankSize.Height:
+		blank, err := blankPage(c.sizes)
+		if err != nil {
+			return PadUnchanged, err
+		}
+		return PadResized, rewrite(path, zr, func(zw *zip.Writer) error {
+			if err := writeBlank(zw, blank); err != nil {
+				return err
+			}
+			return copyExcept(zw, zr, c.blank)
+		})
+	case c.blank == nil && want && !c.realZero:
+		blank, err := blankPage(c.sizes)
+		if err != nil {
+			return PadUnchanged, err
+		}
+		return PadAdded, rewrite(path, zr, func(zw *zip.Writer) error {
+			if err := writeBlank(zw, blank); err != nil {
+				return err
+			}
+			return copyExcept(zw, zr, nil)
+		})
+	}
+	return PadUnchanged, nil
+}
+
+// Unpad takes the leading blank page out of a chapter and marks it NoPadMark
+// so Pad leaves it without one. It reports PadUnchanged if the chapter was
+// already unpadded and marked.
+func Unpad(path string) (PadResult, error) {
+	zr, err := zip.OpenReader(path)
 	if err != nil {
-		return false, err
+		return PadUnchanged, err
 	}
-	tmp := out.Name()
-	zw := zip.NewWriter(out)
-	fail := func(err error) (bool, error) {
-		zw.Close()
-		out.Close()
-		os.Remove(tmp)
-		return false, err
+	defer zr.Close()
+
+	c, err := scanChapter(zr)
+	if err != nil {
+		return PadUnchanged, err
 	}
-	if err := writeBlank(zw, blank); err != nil {
-		return fail(err)
+	marked := bytes.Contains(c.info, []byte(NoPadMark))
+	if c.blank == nil && marked {
+		return PadUnchanged, nil
 	}
+	result := PadRemoved
+	if c.blank == nil {
+		result = PadUnchanged // only the mark is new
+	}
+	return result, rewrite(path, zr, func(zw *zip.Writer) error {
+		for _, f := range zr.File {
+			if f == c.blank || f.Name == "ComicInfo.xml" {
+				continue
+			}
+			if err := zw.Copy(f); err != nil {
+				return err
+			}
+		}
+		info := c.info
+		if !marked {
+			info = markComicInfo(info, NoPadMark)
+		}
+		w, err := zw.CreateHeader(&zip.FileHeader{Name: "ComicInfo.xml", Method: zip.Deflate, Modified: time.Now()})
+		if err != nil {
+			return err
+		}
+		_, err = w.Write(info)
+		return err
+	})
+}
+
+// chapter is what Pad and Unpad need to know about an archive.
+type chapter struct {
+	blank           *zip.File // Tomo's all-black 0000 page, if present
+	blankSize       image.Config
+	realZero        bool           // a 0000 page that is real content
+	sizes           []image.Config // sizes of the real pages
+	opensWithSpread bool           // the first real page is wider than tall
+	info            []byte         // ComicInfo.xml, if present
+}
+
+func scanChapter(zr *zip.ReadCloser) (chapter, error) {
+	var c chapter
+	seenFirst := false
 	for _, f := range zr.File {
+		if f.Name == "ComicInfo.xml" {
+			b, err := readEntry(f)
+			if err != nil {
+				return c, err
+			}
+			c.info = b
+			continue
+		}
+		if !isImage(f.Name) {
+			continue
+		}
+		if strings.HasPrefix(f.Name, "0000.") && c.blank == nil && !seenFirst {
+			if size, ok := blankSize(f); ok {
+				c.blank, c.blankSize = f, size
+				continue
+			}
+			c.realZero = true
+		}
+		cfg, ok := entrySize(f)
+		if ok {
+			c.sizes = append(c.sizes, cfg)
+		}
+		if !seenFirst {
+			seenFirst = true
+			c.opensWithSpread = ok && cfg.Width > cfg.Height
+		}
+	}
+	return c, nil
+}
+
+// blankSize reports the size of f if it is an all-black image.
+func blankSize(f *zip.File) (image.Config, bool) {
+	rc, err := f.Open()
+	if err != nil {
+		return image.Config{}, false
+	}
+	defer rc.Close()
+	img, _, err := image.Decode(rc)
+	if err != nil {
+		return image.Config{}, false
+	}
+	b := img.Bounds()
+	if g, ok := img.(*image.Gray); ok { // Tomo's own blank pages: check the bytes directly
+		for _, v := range g.Pix {
+			if v != 0 {
+				return image.Config{}, false
+			}
+		}
+		return image.Config{Width: b.Dx(), Height: b.Dy()}, true
+	}
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if r, g, bl, _ := img.At(x, y).RGBA(); r|g|bl != 0 {
+				return image.Config{}, false
+			}
+		}
+	}
+	return image.Config{Width: b.Dx(), Height: b.Dy()}, true
+}
+
+// copyExcept copies every entry of zr except skip into zw, in order.
+func copyExcept(zw *zip.Writer, zr *zip.ReadCloser, skip *zip.File) error {
+	for _, f := range zr.File {
+		if f == skip {
+			continue
+		}
 		if err := zw.Copy(f); err != nil {
-			return fail(err)
+			return err
 		}
 	}
-	if err := zw.Close(); err != nil {
-		return fail(err)
-	}
-	if err := out.Close(); err != nil {
-		os.Remove(tmp)
-		return false, err
-	}
-	// CreateTemp makes the file 0600; keep the original's mode so a library
-	// served by another user (Komga) can still read it.
-	if fi, err := os.Stat(path); err == nil {
-		if err := os.Chmod(tmp, fi.Mode().Perm()); err != nil {
-			os.Remove(tmp)
-			return false, err
-		}
-	}
-	// Windows can't rename over a file that still has an open handle.
-	zr.Close()
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return false, err
-	}
-	return true, nil
+	return nil
 }
 
 func writeBlank(zw *zip.Writer, blank []byte) error {
@@ -208,15 +341,19 @@ func writeBlank(zw *zip.Writer, blank []byte) error {
 	return err
 }
 
-// blankPage renders an all-black PNG at the chapter's most common page size, so
-// the reader scales it like a real page (a chapter's first page is often an
-// odd-sized cover or spread). With no readable sizes it falls back to a typical
-// 2:3 page.
+// blankPage renders an all-black PNG at the chapter's most common single-page
+// size, so the reader scales it like a real page (a chapter's first page is
+// often an odd-sized cover). Spreads don't count, even in a chapter that has
+// more spreads than single pages: a spread-sized blank would fill a whole
+// screen. With no readable portrait sizes it falls back to a typical 2:3 page.
 func blankPage(sizes []image.Config) ([]byte, error) {
 	w, h := 800, 1200
 	counts := map[[2]int]int{}
 	best := 0
 	for _, c := range sizes {
+		if c.Width > c.Height {
+			continue
+		}
 		k := [2]int{c.Width, c.Height}
 		counts[k]++
 		if counts[k] > best {
@@ -229,6 +366,12 @@ func blankPage(sizes []image.Config) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// startsWithSpread reports whether the chapter's first page is wider than tall.
+func startsWithSpread(pages []download.Page) bool {
+	cfg, ok := fileSize(pages[0].Path)
+	return ok && cfg.Width > cfg.Height
 }
 
 func fileSize(path string) (image.Config, bool) {

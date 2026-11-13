@@ -38,7 +38,8 @@ bash scripts/build-cli.sh v1.0.0       # or cross-compile all OS targets into di
 ```bash
 tomo [flags] <series-url>      # download a series
 tomo search [flags] <query>    # find a series by title
-tomo pad <dir|cbz>...          # add the -pad-start blank page to chapters already downloaded
+tomo pad <dir|cbz>...          # add (or repair) the -pad-start blank page in chapters already downloaded
+tomo unpad <cbz>...            # remove it where split spreads pair up without it
 tomo black <dir|cbz>...        # make pages greyscale with true blacks, for OLED screens
 ```
 
@@ -105,9 +106,20 @@ file behind (CBZs are written atomically), so just run the command again.
 In landscape on an iPad, the reader shows two pages side by side. If a
 chapter opens with a single title page, every double-page spread after it gets
 split across two screens. `-pad-start` puts a blank black page in front so the
-spreads pair up. Use it for page-based manga, not long-strip manhwa. To pad
-chapters you already have, run `tomo pad ~/Manga/<Series>`; chapters that
-already have the blank page are skipped.
+spreads pair up. Use it for page-based manga, not long-strip manhwa.
+
+- A chapter that opens with a spread gets no blank page. A spread stored as one
+  wide image shows on its own anyway, so the blank page would just sit alone.
+- The blank page is sized like the chapter's single pages, never like a spread.
+
+To pad chapters you already have, run `tomo pad ~/Manga/<Series>`. It also
+repairs chapters an older Tomo padded wrongly: it removes the blank page in
+front of an opening spread and redraws spread-sized blank pages. Chapters that
+are already right are left alone.
+
+Some chapters have spreads split across two files that only pair up *without*
+the blank page. Run `tomo unpad` on those chapters. They're marked in
+`ComicInfo.xml`, so a later `tomo pad` leaves them unpadded.
 
 ### True blacks for OLED screens
 
