@@ -131,6 +131,8 @@ main() {
     echo "       create it from series.txt.example" >&2
     exit 1
   fi
+  # count_cbz runs under pipefail, so a missing holding folder would abort the run.
+  mkdir -p "$STAGING_DIR"
 
   local failures=0 checked=0 skipped=0 new_total=0
   local line entry url days name rest first before after new
